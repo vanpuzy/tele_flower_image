@@ -92,7 +92,11 @@ bot.on("photo", async (msg) => {
     console.log(`✅ File Excel đã tạo: ${excelFilePath}`);
 
     // 6️⃣ Gửi file Excel lại cho nhóm chat
-    await bot.sendDocument(chatId, excelFilePath, { caption: "✅ File Excel đã được tạo!" });
+    // await bot.sendDocument(chatId, excelFilePath, { caption: "✅ File Excel đã được tạo!" });
+    await bot.sendDocument(chatId, excelFilePath, {
+      caption: "✅ File Excel đã được tạo!",
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    })
 
     // Xóa file Excel sau khi gửi
     fs.unlinkSync(excelFilePath);
