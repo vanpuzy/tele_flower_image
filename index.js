@@ -4,9 +4,13 @@ const fs = require("fs");
 const path = require("path");
 const FormData = require("form-data");
 const XLSX = require("xlsx");
-require("dotenv").config();
 
-BOT_TOKEN = process.env.TELEGRAM_BOT_DAT_TOKEN
+TELEGRAM_BOT_DAT_TOKEN="7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
+
+AWS_RESULT_BUCKET=excel-results 
+
+
+BOT_TOKEN = TELEGRAM_BOT_DAT_TOKEN
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 
