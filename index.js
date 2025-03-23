@@ -6,10 +6,6 @@ const FormData = require("form-data");
 const XLSX = require("xlsx");
 
 TELEGRAM_BOT_DAT_TOKEN="7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
-
-AWS_RESULT_BUCKET=excel-results 
-
-
 BOT_TOKEN = TELEGRAM_BOT_DAT_TOKEN
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
