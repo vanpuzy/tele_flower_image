@@ -14,7 +14,7 @@ const dbConfig = {
 };
 TELEGRAM_BOT_PHUONG_TOKEN = "6037137720:AAFBEfCG9xWY4K_3tx7VSZzMXGgmt9-Zdog"
 TELEGRAM_BOT_DAT_TOKEN = "7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
-BOT_TOKEN = TELEGRAM_BOT_DAT_TOKEN
+BOT_TOKEN = TELEGRAM_BOT_PHUONG_TOKEN
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // API URL nhận file
@@ -308,3 +308,44 @@ const generateReportForDays = async (days) => {
     return null;
   }
 };
+
+
+bot.onText(/\/khachhang/, async (msg) => {
+  const chatId = msg.chat.id;
+
+  try {
+    const connection = await mysql.createConnection(dbConfig);
+    const [customers] = await connection.execute("SELECT id, name FROM Customers");
+
+    if (customers.length === 0) {
+      return bot.sendMessage(chatId, "❌ Không có khách hàng nào trong database.");
+    }
+
+    // Tạo Inline Keyboard
+    const keyboard = {
+      inline_keyboard: customers.map((customer) => [
+        { text: customer.name, callback_data: `customer_${customer.id}` },
+      ]),
+    };
+
+    bot.sendMessage(chatId, "📋 Danh sách khách hàng:", {
+      reply_markup: keyboard,
+    });
+
+    await connection.end();
+  } catch (error) {
+    console.error("Lỗi lấy danh sách khách hàng:", error);
+    bot.sendMessage(chatId, "❌ Lỗi khi lấy danh sách khách hàng.");
+  }
+});
+
+// Xử lý khi người dùng chọn khách hàng
+bot.on("callback_query", async (callbackQuery) => {
+  const msg = callbackQuery.message;
+  const data = callbackQuery.data;
+
+  if (data.startsWith("customer_")) {
+    const customerId = data.split("_")[1];
+    bot.sendMessage(msg.chat.id, `✅ Bạn đã chọn khách hàng có ID: ${customerId}`);
+  }
+});
