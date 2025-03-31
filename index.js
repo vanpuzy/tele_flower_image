@@ -12,9 +12,9 @@ const dbConfig = {
   password: "12345678",
   database: "hpnrt"
 };
-TELEGRAM_BOT_PHUONG_TOKEN="6037137720:AAFBEfCG9xWY4K_3tx7VSZzMXGgmt9-Zdog"
-TELEGRAM_BOT_DAT_TOKEN="7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
-BOT_TOKEN = TELEGRAM_BOT_PHUONG_TOKEN
+TELEGRAM_BOT_PHUONG_TOKEN = "6037137720:AAFBEfCG9xWY4K_3tx7VSZzMXGgmt9-Zdog"
+TELEGRAM_BOT_DAT_TOKEN = "7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
+BOT_TOKEN = TELEGRAM_BOT_DAT_TOKEN
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // API URL nhận file
@@ -23,22 +23,51 @@ const apiUrl = "http://222.255.250.26:8090/extract_bill_info/";
 console.log(" bot dang chay")
 
 function parseVietnameseDate(dateString) {
+  const currentDate = new Date();
+  const defaultDay = String(currentDate.getDate()).padStart(2, "0");
+  const defaultMonth = String(currentDate.getMonth() + 1).padStart(2, "0");
+  const defaultYear = String(currentDate.getFullYear());
+
+  if (typeof dateString !== "string") {
+    console.error("❌ Lỗi: dateString không phải là chuỗi hợp lệ", dateString);
+    return `${defaultYear}-${defaultMonth}-${defaultDay}`;
+  }
+
   const months = {
     "tháng 1": "01", "tháng 2": "02", "tháng 3": "03", "tháng 4": "04",
     "tháng 5": "05", "tháng 6": "06", "tháng 7": "07", "tháng 8": "08",
     "tháng 9": "09", "tháng 10": "10", "tháng 11": "11", "tháng 12": "12"
   };
 
-  const currentYear = new Date().getFullYear(); // Lấy năm hiện tại
-  let match = dateString.match(/Ngày (\d{1,2}) tháng (\d{1,2}) năm (\d{4})?/);
+  // Tìm các phần Ngày, Tháng, Năm
+  const match = dateString.match(/(?:Ngày\s*(\d{1,2}))?\s*(?:tháng\s*(\d{1,2}))?\s*(?:năm\s*(\d{4}))?/i);
 
-  if (!match) return null;
+  if (!match) {
+    console.error("❌ Lỗi: Không tìm thấy định dạng ngày tháng hợp lệ trong", dateString);
+    return `${defaultYear}-${defaultMonth}-${defaultDay}`;
+  }
 
   let [, day, month, year] = match;
-  year = year || currentYear; // Nếu không có năm, dùng năm hiện tại
 
-  return `${year}-${months[`tháng ${month}`]}-${day.padStart(2, "0")}`;
+  day = day ? day.padStart(2, "0") : defaultDay;
+  month = month ? months[`tháng ${month}`] : defaultMonth;
+  year = year || defaultYear;
+
+  return `${year}-${month}-${day}`;
 }
+
+
+function parseVietnameseNumber(value) {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return parseInt(value.replace(/\./g, ""), 10) || 0;
+  }
+  console.error("❌ Lỗi: Dữ liệu không hợp lệ", value);
+  return 0;
+}
+
 
 
 bot.on("photo", async (msg) => {
@@ -97,7 +126,8 @@ bot.on("photo", async (msg) => {
     const sql_connection = await mysql.createConnection(dbConfig);
 
     // Sheet 1: Thông tin khách hàng
-    const totalAmount = jsonData["Thông tin"].reduce((sum, item) => sum + item["thành tiền"], 0);
+    const totalAmount = jsonData["Thông tin"].reduce((sum, item) => sum + parseVietnameseNumber(item["thành tiền"]), 0);
+
     const customerData = [
       ["Tên khách hàng", jsonData["Tên khách hàng"]],
       ["Địa chỉ", jsonData["Địa chỉ"]],
@@ -107,11 +137,32 @@ bot.on("photo", async (msg) => {
     const sheet1 = XLSX.utils.aoa_to_sheet(customerData);
     XLSX.utils.book_append_sheet(workbook, sheet1, "Khách hàng");
 
-        // Kiểm tra xem khách hàng đã tồn tại chưa
+
+    const orderDate = parseVietnameseDate(jsonData["Thời gian"]);
+    if (!orderDate) {
+      bot.sendMessage(chatId, "❌ Lỗi định dạng ngày tháng.");
+      return;
+    }
+
+
+
+
+    // Sheet 2: Danh sách hàng hóa
+    const headers = ["Thứ tự", "Tên mặt hàng", "Số lượng", "Đơn giá", "Thành tiền"];
+    const dataRows = jsonData["Thông tin"].map(item => [
+      item["thứ tự"], item["tên mặt hàng"], item["số lượng"], parseVietnameseNumber(item["đơn giá"]), 
+      parseVietnameseNumber(item["thành tiền"]) 
+    ]);
+
+
+
+    // Kiểm tra xem khách hàng đã tồn tại chưa
     const [existingCustomer] = await sql_connection.execute(
       "SELECT id FROM Customers WHERE name = ? AND address = ?",
       [jsonData["Tên khách hàng"], jsonData["Địa chỉ"]]
     );
+
+
 
     let customerId;
     if (existingCustomer.length > 0) {
@@ -124,29 +175,18 @@ bot.on("photo", async (msg) => {
       customerId = customerResult.insertId;
     }
 
-    const orderDate = parseVietnameseDate(jsonData["Thời gian"]);
-    if (!orderDate) {
-      bot.sendMessage(chatId, "❌ Lỗi định dạng ngày tháng.");
-      return;
-    }
-
     const [orderResult] = await sql_connection.execute(
-      "INSERT INTO Orders (customer_id, order_date) VALUES (?, ?)",
-      [customerId, orderDate]
+      "INSERT INTO Orders (customer_id, order_date, totalAmount) VALUES (?, ?, ?)",
+      [customerId, orderDate, totalAmount]
     );
     const orderId = orderResult.insertId;
 
-
-    // Sheet 2: Danh sách hàng hóa
-    const headers = ["Thứ tự", "Tên mặt hàng", "Số lượng", "Đơn giá", "Thành tiền"];
-    const dataRows = jsonData["Thông tin"].map(item => [
-      item["thứ tự"], item["tên mặt hàng"], item["số lượng"], item["đơn giá"], item["thành tiền"]
-    ]);
-
     for (const item of jsonData["Thông tin"]) {
+      const itemName = item["tên mặt hàng"] ? item["tên mặt hàng"] : null;
       await sql_connection.execute(
         "INSERT INTO Order_Items (order_id, item_name, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)",
-        [orderId, item["tên mặt hàng"], item["số lượng"], item["đơn giá"], item["thành tiền"]]
+        [orderId, itemName, item["số lượng"],  parseVietnameseNumber(item["đơn giá"]), 
+        parseVietnameseNumber(item["thành tiền"]) ]
       );
     }
 
@@ -161,7 +201,7 @@ bot.on("photo", async (msg) => {
     // 5️⃣ Lưu file Excel
     const excelFilePath = `./data_${chatId}.xlsx`;
     XLSX.writeFile(workbook, excelFilePath);
-    
+
     console.log(`✅ File Excel đã tạo: ${excelFilePath}`);
 
     // 6️⃣ Gửi file Excel lại cho nhóm chat
@@ -208,13 +248,17 @@ const generateReportForDays = async (days) => {
 
   try {
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
+    startDate.setDate(startDate.getDate() - days +1);
     const formattedStartDate = startDate.toISOString().split("T")[0];
 
     const [orders] = await sql_connection.execute(
-      "SELECT o.id, c.name AS customer_name, c.address, o.order_date FROM Orders o " +
-      "JOIN Customers c ON o.customer_id = c.id " +
-      "WHERE o.order_date >= ?",
+      `SELECT o.id, c.name AS customer_name, c.address, o.order_date, 
+              SUM(oi.total_price) AS total_amount
+       FROM Orders o 
+       JOIN Customers c ON o.customer_id = c.id 
+       JOIN Order_Items oi ON o.id = oi.order_id
+       WHERE o.order_date >= ?
+       GROUP BY o.id, c.name, c.address, o.order_date`,
       [formattedStartDate]
     );
 
@@ -224,24 +268,31 @@ const generateReportForDays = async (days) => {
     }
 
     const workbook = XLSX.utils.book_new();
-    
+
+    // Tạo sheet tổng hợp
+    const summarySheetData = [["ID Hóa Đơn", "Tên Khách Hàng", "Địa Chỉ", "Ngày Đặt Hàng", "Tổng Tiền"]];
+    for (const order of orders) {
+      summarySheetData.push([order.id, order.customer_name, order.address, order.order_date, order.total_amount]);
+    }
+    const summarySheet = XLSX.utils.aoa_to_sheet(summarySheetData);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Tổng hợp");
+
+    // Thêm từng hóa đơn vào sheet riêng
     for (const order of orders) {
       const sheetData = [["Tên Mặt Hàng", "Số Lượng", "Đơn Giá", "Thành Tiền"]];
-      
+
       const [items] = await sql_connection.execute(
         "SELECT item_name, quantity, unit_price, total_price FROM Order_Items WHERE order_id = ?",
         [order.id]
       );
-      
-      let totalAmount = 0;
+
       for (const item of items) {
         sheetData.push([item.item_name, item.quantity, item.unit_price, item.total_price]);
-        totalAmount += item.total_price;
       }
-      
+
       sheetData.push([]); // Dòng trống
-      sheetData.push(["Tổng tiền", "", "", totalAmount]);
-      
+      sheetData.push(["Tổng tiền", "", "", order.total_amount]);
+
       const sheet = XLSX.utils.aoa_to_sheet(sheetData);
       XLSX.utils.book_append_sheet(workbook, sheet, `Hóa đơn ${order.id}`);
     }
