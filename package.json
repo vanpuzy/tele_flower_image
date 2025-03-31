@@ -12,6 +12,7 @@
     "axios": "^1.8.4",
     "form-data": "^4.0.2",
     "fs": "^0.0.1-security",
+    "mysql2": "^3.14.0",
     "node-telegram-bot-api": "^0.66.0",
     "path": "^0.12.7",
     "xlsx": "^0.18.5"
