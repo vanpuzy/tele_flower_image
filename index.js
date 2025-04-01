@@ -154,7 +154,21 @@ bot.on("photo", async (msg) => {
 
 bot.onText(/\/menu/, (msg) => {
   const chatId = msg.chat.id;
-  delete userStates[chatId];
+
+  if (userStates[chatId]) {
+    delete userStates[chatId];
+    console.log(`✅ Xóa userStates[${chatId}]`);
+  } else {
+    console.log(`⚠️ Không có userStates[${chatId}] để xóa`);
+  }
+
+  if (awaitingOrderReportDays[chatId]) {
+    delete awaitingOrderReportDays[chatId];
+    console.log(`✅ Xóa awaitingOrderReportDays[${chatId}]`);
+  } else {
+    console.log(`⚠️ Không có awaitingOrderReportDays[${chatId}] để xóa`);
+  }
+
   const keyboard = {
     inline_keyboard: [
       [{ text: "📊 Báo cáo Hóa Đơn ", callback_data: "menu_report" }],
@@ -564,6 +578,7 @@ async function askForDays(chatId, customerName) {
             resolve(null);
           } else {
             resolve(days);
+            bot.sendMessage(chatId, "📥 Đang tổng hợp dữ liệu.");
           }
         });
       });
