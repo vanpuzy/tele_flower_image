@@ -14,7 +14,7 @@ const dbConfig = {
 };
 TELEGRAM_BOT_PHUONG_TOKEN = "6037137720:AAFBEfCG9xWY4K_3tx7VSZzMXGgmt9-Zdog"
 TELEGRAM_BOT_DAT_TOKEN = "7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
-BOT_TOKEN = TELEGRAM_BOT_DAT_TOKEN
+BOT_TOKEN = TELEGRAM_BOT_PHUONG_TOKEN
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // API URL nhận file
@@ -272,17 +272,19 @@ bot.on("message", async (msg) => {
 
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
-  const text = msg.text.trim();
+  if (msg.text) {
+    const text = msg.text.trim();
 
-  if (awaitingOrderReportDays[chatId]) {
-    const days = parseInt(text, 10);
-    if (!isNaN(days) && days > 0) {
-      bot.sendMessage(chatId, `🔄 Đang tạo báo cáo tổng hợp ${days} ngày gần nhất...`);
-      await generateOrderItemReport(chatId, days);
-    } else {
-      bot.sendMessage(chatId, "⚠️ Vui lòng nhập số ngày hợp lệ (lớn hơn 0).");
+    if (awaitingOrderReportDays[chatId]) {
+      const days = parseInt(text, 10);
+      if (!isNaN(days) && days > 0) {
+        bot.sendMessage(chatId, `🔄 Đang tạo báo cáo tổng hợp ${days} ngày gần nhất...`);
+        await generateOrderItemReport(chatId, days);
+      } else {
+        bot.sendMessage(chatId, "⚠️ Vui lòng nhập số ngày hợp lệ (lớn hơn 0).");
+      }
+      delete awaitingOrderReportDays[chatId]; // Reset trạng thái nhập số ngày
     }
-    delete awaitingOrderReportDays[chatId]; // Reset trạng thái nhập số ngày
   }
 });
 
