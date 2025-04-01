@@ -23,6 +23,8 @@ const apiUrl = "http://222.255.250.26:8090/extract_bill_info/";
 console.log(" bot dang chay")
 
 const userStates = {};
+const awaitingOrderReportDays = {};
+
 async function downloadPhoto(fileId, chatId, bot, BOT_TOKEN) {
   const fileInfo = await bot.getFile(fileId);
   const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.file_path}`;
@@ -152,12 +154,13 @@ bot.on("photo", async (msg) => {
 
 bot.onText(/\/menu/, (msg) => {
   const chatId = msg.chat.id;
-
+  delete userStates[chatId];
   const keyboard = {
     inline_keyboard: [
-      [{ text: "📊 Báo cáo Hóa Đơn", callback_data: "menu_report" }],
+      [{ text: "📊 Báo cáo Hóa Đơn ", callback_data: "menu_report" }],
       [{ text: "📋 Danh sách Khách Hàng", callback_data: "menu_customers" }],
-      [{ text: "📅 Chọn Ngày", callback_data: "menu_date" }]
+      [{ text: "📅 Chọn Hóa Đơn theo Ngày", callback_data: "menu_date" }],
+      [{ text: "📅 Báo cáo mặt hàng", callback_data: "menu_items" }]
     ]
   };
 
@@ -184,6 +187,9 @@ bot.on("callback_query", async (callbackQuery) => {
   } else if (data === "menu_date") {
     await handleDateRequest(chatId)
     bot.emit("text", { chat: { id: chatId }, text: "/chonngay" });
+  }else  if (data === "menu_items") {
+    bot.sendMessage(chatId, "📅 Nhập số ngày muốn tổng hợp dữ liệu:");
+    awaitingOrderReportDays[chatId] = true;
   }
 
   
@@ -246,6 +252,22 @@ bot.on("message", async (msg) => {
     });
 
     fs.unlinkSync(excelFilePath);
+  }
+});
+
+bot.on("message", async (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text.trim();
+
+  if (awaitingOrderReportDays[chatId]) {
+    const days = parseInt(text, 10);
+    if (!isNaN(days) && days > 0) {
+      bot.sendMessage(chatId, `🔄 Đang tạo báo cáo tổng hợp ${days} ngày gần nhất...`);
+      await generateOrderItemReport(chatId, days);
+    } else {
+      bot.sendMessage(chatId, "⚠️ Vui lòng nhập số ngày hợp lệ (lớn hơn 0).");
+    }
+    delete awaitingOrderReportDays[chatId]; // Reset trạng thái nhập số ngày
   }
 });
 
@@ -546,4 +568,74 @@ async function askForDays(chatId, customerName) {
         });
       });
   });
+}
+
+
+async function generateOrderItemReport(chatId, days) {
+  const connection = await mysql.createConnection(dbConfig);
+
+  try {
+    // Tính ngày giới hạn
+    const dateLimit = new Date();
+    dateLimit.setDate(dateLimit.getDate() - days);
+    const formattedDate = dateLimit.toISOString().split('T')[0]; // yyyy-mm-dd
+
+    // Truy vấn tổng hợp mặt hàng
+    const [rows] = await connection.execute(`
+      SELECT oi.item_name, 
+             SUM(oi.quantity) AS total_quantity, 
+             SUM(oi.total_price) AS total_price
+      FROM Order_Items oi
+      JOIN Orders o ON oi.order_id = o.id
+      WHERE o.order_date >= ?
+      GROUP BY oi.item_name
+    `, [formattedDate]);
+
+    if (rows.length === 0) {
+      bot.sendMessage(chatId, "📭 Không có mặt hàng nào trong khoảng thời gian này.");
+      return null;
+    }
+
+    // Tạo file Excel
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Báo cáo mặt hàng');
+
+    // Thêm tiêu đề cột
+    worksheet.columns = [
+      { header: 'Mặt hàng', key: 'item_name', width: 20 },
+      { header: 'Tổng số lượng', key: 'total_quantity', width: 20 },
+      { header: 'Tổng giá trị', key: 'total_price', width: 20 },
+    ];
+
+    // Thêm dữ liệu vào sheet
+    rows.forEach(row => {
+      worksheet.addRow({
+        item_name: row.item_name,
+        total_quantity: row.total_quantity,
+        total_price: row.total_price,
+      });
+    });
+
+    // Lưu file Excel
+    const filePath = `./order_item_report_${formattedDate}.xlsx`;
+    await workbook.xlsx.writeFile(filePath);
+
+    console.log(`📄 File báo cáo đã được tạo: ${filePath}`);
+
+    // Gửi file báo cáo đến Telegram bot
+    await bot.sendDocument(chatId, filePath, {
+      caption: `📊 Báo cáo mặt hàng bán được trong ${days} ngày gần nhất.`,
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+
+    // Xóa file sau khi gửi
+    fs.unlinkSync(filePath);
+    console.log(`🗑️ File đã được xóa sau khi gửi: ${filePath}`);
+
+  } catch (error) {
+    console.error("❌ Lỗi khi tạo báo cáo:", error);
+    bot.sendMessage(chatId, "⚠️ Đã xảy ra lỗi khi tạo báo cáo.");
+  } finally {
+    await connection.end();
+  }
 }
