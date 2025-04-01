@@ -6,20 +6,30 @@ const FormData = require("form-data");
 const XLSX = require("xlsx");
 const mysql = require("mysql2/promise");
 
+
+require('dotenv').config();
+
+// const dbConfig = {
+//   host: process.env.DB_HOST,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+//   database: process.env.DB_NAME
+// };
+
 const dbConfig = {
   host: "database-hpnrt.cz0i2cyea1x3.ap-northeast-2.rds.amazonaws.com",
   user: "admin",
   password: "12345678",
   database: "hpnrt"
 };
+
 TELEGRAM_BOT_PHUONG_TOKEN = "6037137720:AAFBEfCG9xWY4K_3tx7VSZzMXGgmt9-Zdog"
 TELEGRAM_BOT_DAT_TOKEN = "7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
-BOT_TOKEN = TELEGRAM_BOT_DAT_TOKEN
+BOT_TOKEN = TELEGRAM_BOT_PHUONG_TOKEN//process.env.TELEGRAM_BOT_TOKEN
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // API URL nhận file
-const apiUrl = "http://222.255.250.26:8090/extract_bill_info/";
-
+const apiUrl = process.env.API_URL //"http://222.255.250.26:8090/extract_bill_info/";
 console.log(" bot dang chay")
 
 const userStates = {};
