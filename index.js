@@ -174,7 +174,7 @@ bot.onText(/\/menu/, (msg) => {
       [{ text: "📊 Báo cáo Hóa Đơn ", callback_data: "menu_report" }],
       [{ text: "📋 Danh sách Khách Hàng", callback_data: "menu_customers" }],
       [{ text: "📅 Chọn Hóa Đơn theo Ngày", callback_data: "menu_date" }],
-      [{ text: "📅 Báo cáo mặt hàng", callback_data: "menu_items" }]
+      [{ text: "📊 Báo cáo mặt hàng", callback_data: "menu_items" }]
     ]
   };
 
