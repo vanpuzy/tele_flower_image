@@ -174,7 +174,8 @@ bot.onText(/\/menu/, (msg) => {
       [{ text: "📊 Báo cáo Hóa Đơn ", callback_data: "menu_report" }],
       [{ text: "📋 Danh sách Khách Hàng", callback_data: "menu_customers" }],
       [{ text: "📅 Chọn Hóa Đơn theo Ngày", callback_data: "menu_date" }],
-      [{ text: "📊 Báo cáo mặt hàng", callback_data: "menu_items" }]
+      [{ text: "📊 Báo cáo mặt hàng", callback_data: "menu_items" }],
+
     ]
   };
 
@@ -663,3 +664,59 @@ async function generateOrderItemReport(chatId, days) {
     await connection.end();
   }
 }
+
+// Lệnh xử lý "/cleardb"
+bot.onText(/\/cleardb/, (msg) => {
+  const chatId = msg.chat.id;
+
+  // Gửi cảnh báo xác nhận trước khi xóa
+  bot.sendMessage(chatId, "⚠️ Bạn có chắc chắn muốn xóa toàn bộ database? Hành động này không thể hoàn tác!", {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "✅ Xóa ngay", callback_data: "confirm_clear_db" }],
+        [{ text: "❌ Hủy", callback_data: "cancel_clear_db" }],
+      ],
+    },
+  });
+});
+
+// Xử lý xác nhận từ người dùng
+bot.on("callback_query", (query) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+
+  if (data === "confirm_clear_db") {
+    clearDatabase(chatId);
+  } else if (data === "cancel_clear_db") {
+    bot.sendMessage(chatId, "✅ Hủy bỏ thao tác xóa database.");
+  }
+});
+
+// Hàm xóa dữ liệu
+const clearDatabase = async (chatId) => {
+  try {
+    // Kết nối đến database
+    const connection = await mysql.createConnection(dbConfig);
+
+    const queries = [
+      "DELETE FROM Order_Items;",
+      "DELETE FROM Orders;",
+      "DELETE FROM Customers;",
+    ];
+
+    // Thực thi tất cả các truy vấn một cách bất đồng bộ
+    for (const query of queries) {
+      await connection.execute(query);  // Chạy từng truy vấn
+      console.log(`✅ Xóa dữ liệu thành công: ${query}`);
+    }
+
+    // Sau khi tất cả truy vấn đã hoàn tất
+    bot.sendMessage(chatId, "✅ Database đã được xóa sạch!");
+
+    // Đóng kết nối sau khi hoàn tất
+    await connection.end();
+  } catch (err) {
+    console.error(`❌ Lỗi khi xóa dữ liệu: ${err.message}`);
+    bot.sendMessage(chatId, "❌ Xóa dữ liệu thất bại.");
+  }
+};
