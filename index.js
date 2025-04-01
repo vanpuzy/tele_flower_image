@@ -22,6 +22,7 @@ const apiUrl = "http://222.255.250.26:8090/extract_bill_info/";
 
 console.log(" bot dang chay")
 
+const userStates = {};
 async function downloadPhoto(fileId, chatId, bot, BOT_TOKEN) {
   const fileInfo = await bot.getFile(fileId);
   const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${fileInfo.file_path}`;
@@ -169,19 +170,23 @@ bot.onText(/\/menu/, (msg) => {
 bot.on("callback_query", async (callbackQuery) => {
   const chatId = callbackQuery.message.chat.id;
   const data = callbackQuery.data;
-
+  bot.answerCallbackQuery(callbackQuery.id);
   if (data === "menu_report") {
-    bot.sendMessage(chatId, "Nhập lệnh: `/report <số ngày>` để lấy báo cáo.", { parse_mode: "Markdown" });
+    bot.sendMessage(chatId, "📆 Vui lòng nhập số ngày bạn muốn xem báo cáo:");
+    
+    // Đánh dấu rằng người dùng đang nhập số ngày
+    userStates[chatId] = { awaitingReportDays: true };
+    // bot.sendMessage(chatId, "Nhập lệnh: `/report <số ngày>` để lấy báo cáo.", { parse_mode: "Markdown" });
   } else if (data === "menu_customers") {
     await handleCustomersRequest(chatId)
     // Giả lập gọi lại lệnh /khachhang
     bot.emit("text", { chat: { id: chatId }, text: "/khachhang" });
   } else if (data === "menu_date") {
-    await  handleDateRequest(chatId)
+    await handleDateRequest(chatId)
     bot.emit("text", { chat: { id: chatId }, text: "/chonngay" });
   }
 
-  bot.answerCallbackQuery(callbackQuery.id);
+  
 });
 
 bot.on("message", async (msg) => {
@@ -208,6 +213,41 @@ bot.on("message", async (msg) => {
   }
 });
 
+
+bot.on("message", async (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text ? msg.text.trim() : "";
+
+  // Kiểm tra nếu người dùng đang nhập số ngày
+  if (userStates[chatId]?.awaitingReportDays) {
+    const days = parseInt(text, 10);
+
+    if (isNaN(days) || days <= 0) {
+      bot.sendMessage(chatId, "❌ Vui lòng nhập một số ngày hợp lệ (lớn hơn 0).");
+      return;
+    }
+
+    // Xóa trạng thái chờ nhập số ngày
+    delete userStates[chatId];
+
+    bot.sendMessage(chatId, `⏳ Đang tổng hợp báo cáo trong ${days} ngày gần đây...`);
+
+    // Gọi hàm tạo báo cáo
+    const excelFilePath = await generateReportForDays(days);
+
+    if (!excelFilePath) {
+      bot.sendMessage(chatId, `📭 Không có hóa đơn nào trong ${days} ngày gần đây.`);
+      return;
+    }
+
+    await bot.sendDocument(chatId, excelFilePath, {
+      caption: `📊 Báo cáo hóa đơn trong ${days} ngày gần đây.`,
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+
+    fs.unlinkSync(excelFilePath);
+  }
+});
 
 // bot.onText(/\/khachhang/, async (msg) => {
 async function handleCustomersRequest(chatId) {
@@ -241,22 +281,23 @@ async function handleCustomersRequest(chatId) {
 // });
 
 // bot.onText(/\/chonngay/, (msg) => {
-async function handleDateRequest(chatId) {
-  // const chatId = msg.chat.id;
-
-  const years = [2025, 2024, 2023, 2022, 2021]; // Danh sách năm có sẵn
-  const buttons = years.map((year) => [{ text: `${year}`, callback_data: `year_${year}` }]);
-
-  bot.sendMessage(chatId, "📅 Chọn năm:", {
-    reply_markup: { inline_keyboard: buttons }
-  });
-}
+  async function handleDateRequest(chatId) {
+    const currentYear = new Date().getFullYear();
+    const years = Array.from({ length: 5 }, (_, i) => currentYear - i); // Lấy 5 năm gần nhất
+  
+    const buttons = years.map((year) => [{ text: `${year}`, callback_data: `year_${year}` }]);
+  
+    bot.sendMessage(chatId, "📅 Chọn năm:", {
+      reply_markup: { inline_keyboard: buttons }
+    });
+  }
 // });
 
-bot.on("callback_query", async(query) => {
+bot.on("callback_query", async (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
-
+// Gửi thông báo ngay lập tức để tránh lỗi timeout
+  bot.answerCallbackQuery(query.id, { text: "⏳ Đang xử lý, vui lòng chờ..." }).catch((err) => console.error("Lỗi answerCallbackQuery:", err));
   if (data.startsWith("year_")) {
     const selectedYear = data.split("_")[1];
 
@@ -291,7 +332,7 @@ bot.on("callback_query", async(query) => {
 
     const filePath = await generateReportForDate(selectedDate);
     if (filePath) {
-     await bot.sendDocument(chatId, filePath);
+      await bot.sendDocument(chatId, filePath);
       fs.unlinkSync(filePath);
     } else {
       bot.sendMessage(chatId, "❌ Không có hóa đơn cho ngày này.");
@@ -303,17 +344,22 @@ bot.on("callback_query", async(query) => {
     const customerId = parts[1];
     const customerName = parts.slice(2).join("_"); // Ghép lại tên khách hàng nếu có dấu cách
 
-    bot.sendMessage(chatId, `✅ Bạn đã chọn khách hàng: ${customerName}\n🔄 Đang tạo báo cáo...` );
-
-    // Gọi hàm tạo báo cáo với customerName
-    const reportPath = await generateReportForCustomer(customerName);
-    if (reportPath) {
-      await bot.sendDocument(chatId, reportPath, { caption: "📊 Báo cáo hóa đơn của bạn." });
-      fs.unlinkSync(reportPath);
-    } else {
-      bot.sendMessage(chatId, "❌ Không có hóa đơn nào trong khoảng thời gian này.");
+    const days = await askForDays(chatId, customerName);
+    userStates[chatId] = { awaitingCustomerDays: true, customerName };
+    if (days !== null) {
+      // Tạo báo cáo cho khách hàng theo số ngày
+      const reportPath = await generateCustomerReport(customerName, days);
+      if (reportPath) {
+        await bot.sendDocument(chatId, reportPath, { caption: "📊 Báo cáo hóa đơn của bạn." });
+        fs.unlinkSync(reportPath); // Xóa tệp sau khi gửi
+      } else {
+        bot.sendMessage(chatId, "❌ Không có hóa đơn nào trong khoảng thời gian này.");
+      }
     }
   }
+
+  bot.answerCallbackQuery(query.id);
+
 });
 
 
@@ -440,12 +486,38 @@ const generateReportForDate = async (date) => {
   return generateExcelReport(orders, `./report_${date}.xlsx`);
 };
 
+async function generateCustomerReport(customerName, days) {
+  // Tạo báo cáo cho khách hàng theo số ngày (ví dụ, gọi hàm generateReportForCustomer)
+  const reportPath = await generateReportForCustomer(customerName, days);
+  if (reportPath) {
+    return reportPath;
+  } else {
+    return null;
+  }
+}
 // Hàm xuất báo cáo theo khách hàng
-const generateReportForCustomer = async (customerName) => {
-  console.log(`📥 Đang tổng hợp hóa đơn cho khách hàng: ${customerName}`);
-  const orders = await fetchOrders("c.name = ?", [customerName]);
-  return generateExcelReport(orders, `./report_customer_${customerName}.xlsx`);
+const generateReportForCustomer = async (customerName, days) => {
+  console.log(`📥 Đang tổng hợp hóa đơn cho khách hàng: ${customerName} trong ${days} ngày gần đây`);
+
+  // Lấy ngày hiện tại và tính toán ngày bắt đầu
+  const currentDate = new Date();
+  const startDate = new Date(currentDate.setDate(currentDate.getDate() - days));
+
+  // Định dạng ngày theo kiểu `yyyy-mm-dd` nếu cần
+  const startDateString = startDate.toISOString().split("T")[0]; // "yyyy-mm-dd"
+
+  // Lọc các đơn hàng theo tên khách hàng và ngày
+  const orders = await fetchOrders("c.name = ? AND o.order_date >= ?", [customerName, startDateString]);
+
+  if (!orders || orders.length === 0) {
+    console.log("❌ Không có hóa đơn nào trong khoảng thời gian này.");
+    return null;
+  }
+
+  // Tạo báo cáo Excel cho các đơn hàng
+  return generateExcelReport(orders, `./report_customer_${customerName}_${days}_days.xlsx`);
 };
+
 
 // Hàm xuất báo cáo theo số ngày gần đây
 const generateReportForDays = async (days) => {
@@ -457,3 +529,21 @@ const generateReportForDays = async (days) => {
   const orders = await fetchOrders("o.order_date >= ?", [formattedStartDate]);
   return generateExcelReport(orders, `./report_${days}_days.xlsx`);
 };
+
+// Hàm yêu cầu người dùng nhập số ngày
+async function askForDays(chatId, customerName) {
+  return new Promise((resolve) => {
+    bot.sendMessage(chatId, `⏳ Vui lòng nhập số ngày (ví dụ: 3) để lấy báo cáo cho khách hàng ${customerName}:`)
+      .then(() => {
+        bot.once("message", (msg) => {
+          const days = parseInt(msg.text.trim(), 10);
+          if (isNaN(days)) {
+            bot.sendMessage(chatId, "❌ Vui lòng nhập một số hợp lệ.");
+            resolve(null);
+          } else {
+            resolve(days);
+          }
+        });
+      });
+  });
+}
