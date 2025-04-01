@@ -609,7 +609,7 @@ async function generateOrderItemReport(chatId, days) {
 
     // Tạo workbook và worksheet
     const worksheetData = [
-      ["Mặt hàng", "Đơn giá (VND)", "Tổng số lượng", "Tổng giá trị (VND)"], // Tiêu đề cột
+      ["Mặt hàng", "Đơn giá ( nghìn VND)", "Tổng số lượng", "Tổng giá trị ( .000 VND)"], // Tiêu đề cột
       ...rows.map((row) => [row.item_name, row.unit_price, row.total_quantity, row.total_price])
     ];
 
