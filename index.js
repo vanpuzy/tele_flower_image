@@ -190,7 +190,7 @@ bot.on("callback_query", async (callbackQuery) => {
   bot.answerCallbackQuery(callbackQuery.id);
   if (data === "menu_report") {
     bot.sendMessage(chatId, "📆 Vui lòng nhập số ngày bạn muốn xem báo cáo:");
-    
+
     // Đánh dấu rằng người dùng đang nhập số ngày
     userStates[chatId] = { awaitingReportDays: true };
     // bot.sendMessage(chatId, "Nhập lệnh: `/report <số ngày>` để lấy báo cáo.", { parse_mode: "Markdown" });
@@ -201,12 +201,12 @@ bot.on("callback_query", async (callbackQuery) => {
   } else if (data === "menu_date") {
     await handleDateRequest(chatId)
     bot.emit("text", { chat: { id: chatId }, text: "/chonngay" });
-  }else  if (data === "menu_items") {
+  } else if (data === "menu_items") {
     bot.sendMessage(chatId, "📅 Nhập số ngày muốn tổng hợp dữ liệu:");
     awaitingOrderReportDays[chatId] = true;
   }
 
-  
+
 });
 
 bot.on("message", async (msg) => {
@@ -317,22 +317,22 @@ async function handleCustomersRequest(chatId) {
 // });
 
 // bot.onText(/\/chonngay/, (msg) => {
-  async function handleDateRequest(chatId) {
-    const currentYear = new Date().getFullYear();
-    const years = Array.from({ length: 5 }, (_, i) => currentYear - i); // Lấy 5 năm gần nhất
-  
-    const buttons = years.map((year) => [{ text: `${year}`, callback_data: `year_${year}` }]);
-  
-    bot.sendMessage(chatId, "📅 Chọn năm:", {
-      reply_markup: { inline_keyboard: buttons }
-    });
-  }
+async function handleDateRequest(chatId) {
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: 5 }, (_, i) => currentYear - i); // Lấy 5 năm gần nhất
+
+  const buttons = years.map((year) => [{ text: `${year}`, callback_data: `year_${year}` }]);
+
+  bot.sendMessage(chatId, "📅 Chọn năm:", {
+    reply_markup: { inline_keyboard: buttons }
+  });
+}
 // });
 
 bot.on("callback_query", async (query) => {
   const chatId = query.message.chat.id;
   const data = query.data;
-// Gửi thông báo ngay lập tức để tránh lỗi timeout
+  // Gửi thông báo ngay lập tức để tránh lỗi timeout
   bot.answerCallbackQuery(query.id, { text: "⏳ Đang xử lý, vui lòng chờ..." }).catch((err) => console.error("Lỗi answerCallbackQuery:", err));
   if (data.startsWith("year_")) {
     const selectedYear = data.split("_")[1];
@@ -351,8 +351,18 @@ bot.on("callback_query", async (query) => {
     const [_, year, month] = data.split("_");
 
     const days = Array.from({ length: 31 }, (_, i) => i + 1);
-    const buttons = days.map((day) => [{ text: `Ngày ${day}`, callback_data: `day_${year}_${month}_${day}` }]);
+    // Chia các ngày thành các hàng, mỗi hàng chứa tối đa 2 nút
+    const buttons = [];
+    const maxOptionsPerRow = 2;
 
+    for (let i = 0; i < days.length; i++) {
+      // Thêm nút cho mỗi ngày
+      if (i % maxOptionsPerRow === 0) buttons.push([]); // Tạo một hàng mới nếu đủ số cột
+      buttons[buttons.length - 1].push({
+        text: `Ngày ${days[i]}`,
+        callback_data: `day_${year}_${month}_${days[i]}`
+      });
+    }
     bot.editMessageText(`✅ Đã chọn tháng: ${month}/${year}\n📅 Chọn ngày:`, {
       chat_id: chatId,
       message_id: query.message.message_id,
