@@ -569,8 +569,6 @@ async function askForDays(chatId, customerName) {
       });
   });
 }
-
-// Hàm tạo và gửi báo cáo Excel
 async function generateOrderItemReport(chatId, days) {
   const connection = await mysql.createConnection(dbConfig);
 
@@ -584,12 +582,14 @@ async function generateOrderItemReport(chatId, days) {
     const [rows] = await connection.execute(
       `
       SELECT oi.item_name, 
+             oi.unit_price,
              SUM(oi.quantity) AS total_quantity, 
              SUM(oi.total_price) AS total_price
       FROM Order_Items oi
       JOIN Orders o ON oi.order_id = o.id
       WHERE o.order_date >= ?
-      GROUP BY oi.item_name
+      GROUP BY oi.item_name, oi.unit_price
+      ORDER BY total_quantity DESC
     `,
       [formattedDate]
     );
@@ -599,10 +599,18 @@ async function generateOrderItemReport(chatId, days) {
       return null;
     }
 
+    // 📝 Log dữ liệu ra console
+    console.log("📌 Dữ liệu báo cáo mặt hàng:");
+    rows.forEach((row, index) => {
+      console.log(
+        `${index + 1}. ${row.item_name} - Đơn giá: ${row.unit_price} VND - Số lượng: ${row.total_quantity} - Tổng tiền: ${row.total_price} VND`
+      );
+    });
+
     // Tạo workbook và worksheet
     const worksheetData = [
-      ["Mặt hàng", "Tổng số lượng", "Tổng giá trị"], // Tiêu đề cột
-      ...rows.map((row) => [row.item_name, row.total_quantity, row.total_price])
+      ["Mặt hàng", "Đơn giá (VND)", "Tổng số lượng", "Tổng giá trị (VND)"], // Tiêu đề cột
+      ...rows.map((row) => [row.item_name, row.unit_price, row.total_quantity, row.total_price])
     ];
 
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
