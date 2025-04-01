@@ -570,7 +570,7 @@ async function askForDays(chatId, customerName) {
   });
 }
 
-
+// Hàm tạo và gửi báo cáo Excel
 async function generateOrderItemReport(chatId, days) {
   const connection = await mysql.createConnection(dbConfig);
 
@@ -578,10 +578,11 @@ async function generateOrderItemReport(chatId, days) {
     // Tính ngày giới hạn
     const dateLimit = new Date();
     dateLimit.setDate(dateLimit.getDate() - days);
-    const formattedDate = dateLimit.toISOString().split('T')[0]; // yyyy-mm-dd
+    const formattedDate = dateLimit.toISOString().split("T")[0]; // yyyy-mm-dd
 
     // Truy vấn tổng hợp mặt hàng
-    const [rows] = await connection.execute(`
+    const [rows] = await connection.execute(
+      `
       SELECT oi.item_name, 
              SUM(oi.quantity) AS total_quantity, 
              SUM(oi.total_price) AS total_price
@@ -589,49 +590,39 @@ async function generateOrderItemReport(chatId, days) {
       JOIN Orders o ON oi.order_id = o.id
       WHERE o.order_date >= ?
       GROUP BY oi.item_name
-    `, [formattedDate]);
+    `,
+      [formattedDate]
+    );
 
     if (rows.length === 0) {
       bot.sendMessage(chatId, "📭 Không có mặt hàng nào trong khoảng thời gian này.");
       return null;
     }
 
-    // Tạo file Excel
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Báo cáo mặt hàng');
-
-    // Thêm tiêu đề cột
-    worksheet.columns = [
-      { header: 'Mặt hàng', key: 'item_name', width: 20 },
-      { header: 'Tổng số lượng', key: 'total_quantity', width: 20 },
-      { header: 'Tổng giá trị', key: 'total_price', width: 20 },
+    // Tạo workbook và worksheet
+    const worksheetData = [
+      ["Mặt hàng", "Tổng số lượng", "Tổng giá trị"], // Tiêu đề cột
+      ...rows.map((row) => [row.item_name, row.total_quantity, row.total_price])
     ];
 
-    // Thêm dữ liệu vào sheet
-    rows.forEach(row => {
-      worksheet.addRow({
-        item_name: row.item_name,
-        total_quantity: row.total_quantity,
-        total_price: row.total_price,
-      });
-    });
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Báo cáo mặt hàng");
 
-    // Lưu file Excel
+    // Tạo file Excel
     const filePath = `./order_item_report_${formattedDate}.xlsx`;
-    await workbook.xlsx.writeFile(filePath);
+    XLSX.writeFile(workbook, filePath);
 
     console.log(`📄 File báo cáo đã được tạo: ${filePath}`);
 
-    // Gửi file báo cáo đến Telegram bot
+    // Gửi file báo cáo qua Telegram bot
     await bot.sendDocument(chatId, filePath, {
       caption: `📊 Báo cáo mặt hàng bán được trong ${days} ngày gần nhất.`,
-      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     });
 
     // Xóa file sau khi gửi
     fs.unlinkSync(filePath);
     console.log(`🗑️ File đã được xóa sau khi gửi: ${filePath}`);
-
   } catch (error) {
     console.error("❌ Lỗi khi tạo báo cáo:", error);
     bot.sendMessage(chatId, "⚠️ Đã xảy ra lỗi khi tạo báo cáo.");
