@@ -119,8 +119,13 @@ async function saveOrderToDatabase(jsonData, sql_connection) {
   const totalAmount = jsonData["Thông tin"].reduce((sum, item) => sum + parseVietnameseNumber(item["thành tiền"]), 0);
   const orderDate = parseVietnameseDate(jsonData["Thời gian"]);
 
+  // const [existingCustomer] = await sql_connection.execute(
+  //   "SELECT id FROM Customers WHERE name = ? AND address = ?",
+  //   [jsonData["Tên khách hàng"], jsonData["Địa chỉ"]]
+  // );
+
   const [existingCustomer] = await sql_connection.execute(
-    "SELECT id FROM Customers WHERE name = ? AND address = ?",
+    "SELECT id FROM Customers WHERE name = ? ",
     [jsonData["Tên khách hàng"], jsonData["Địa chỉ"]]
   );
 
@@ -242,6 +247,8 @@ bot.on("callback_query", async (callbackQuery) => {
     bot.sendMessage(chatId, "📅 Nhập số ngày muốn tổng hợp dữ liệu:");
     awaitingOrderReportDays[chatId] = true;
   }
+
+
 });
 
 bot.on("message", async (msg) => {
@@ -333,10 +340,11 @@ async function handleCustomersRequest(chatId) {
     if (customers.length === 0) {
       return bot.sendMessage(chatId, "❌ Không có khách hàng nào trong database.");
     }
-
+    console.log("Danh sách khách hàng từ database:", customers);
     // Tạo Inline Keyboard
     const keyboard = {
       inline_keyboard: customers.map((customer) => [
+    
         { text: customer.name, callback_data: `customer_${customer.id}_${customer.name}` },
       ]),
     };
