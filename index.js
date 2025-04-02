@@ -122,10 +122,13 @@ async function saveOrderToDatabase(jsonData, sql_connection) {
   const orderId = orderResult.insertId;
 
   for (const item of jsonData["Thông tin"]) {
+    const unitPrice = parseVietnameseNumber(item["đơn giá"]);
+    const quantity = item["số lượng"];
+    const itemTotal = unitPrice * quantity;
     await sql_connection.execute(
       "INSERT INTO Order_Items (order_id, item_name, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)",
       [orderId, item["tên mặt hàng"], item["số lượng"], parseVietnameseNumber(item["đơn giá"]),
-        parseVietnameseNumber(item["thành tiền"])]
+      itemTotal]
     );
   }
 }
