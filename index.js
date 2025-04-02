@@ -126,7 +126,7 @@ async function saveOrderToDatabase(jsonData, sql_connection) {
 
   const [existingCustomer] = await sql_connection.execute(
     "SELECT id FROM Customers WHERE name = ? ",
-    [jsonData["Tên khách hàng"], jsonData["Địa chỉ"]]
+    [jsonData["Tên khách hàng"]]
   );
 
   let customerId;
@@ -489,6 +489,9 @@ function parseVietnameseDate(dateString) {
 }
 
 function parseVietnameseNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
   if (typeof value === "number") {
     return value;
   }
