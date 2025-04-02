@@ -242,8 +242,6 @@ bot.on("callback_query", async (callbackQuery) => {
     bot.sendMessage(chatId, "📅 Nhập số ngày muốn tổng hợp dữ liệu:");
     awaitingOrderReportDays[chatId] = true;
   }
-
-
 });
 
 bot.on("message", async (msg) => {
