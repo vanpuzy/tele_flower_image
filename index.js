@@ -68,8 +68,16 @@ async function uploadPhoto(filePath, apiUrl) {
 
 function generateExcel(jsonData, chatId) {
   const workbook = XLSX.utils.book_new();
-  const totalAmount = jsonData["Thông tin"].reduce((sum, item) => sum + parseVietnameseNumber(item["thành tiền"]), 0);
 
+  // Calculate totalAmount as the sum of quantity * unit price for each item
+  const totalAmount = jsonData["Thông tin"].reduce((sum, item) => {
+    const unitPrice = parseVietnameseNumber(item["đơn giá"]);
+    const quantity = item["số lượng"];
+    const itemTotal = unitPrice * quantity;
+    return sum + itemTotal;
+  }, 0);
+
+  // Prepare customer data for the first sheet
   const customerData = [
     ["Tên khách hàng", jsonData["Tên khách hàng"]],
     ["Địa chỉ", jsonData["Địa chỉ"]],
@@ -79,21 +87,33 @@ function generateExcel(jsonData, chatId) {
   const sheet1 = XLSX.utils.aoa_to_sheet(customerData);
   XLSX.utils.book_append_sheet(workbook, sheet1, "Khách hàng");
 
+  // Prepare headers for the second sheet
   const headers = ["Thứ tự", "Tên mặt hàng", "Số lượng", "Đơn giá", "Thành tiền"];
-  const dataRows = jsonData["Thông tin"].map(item => [
-    item["thứ tự"], item["tên mặt hàng"], item["số lượng"], parseVietnameseNumber(item["đơn giá"]),
-    parseVietnameseNumber(item["thành tiền"])
-  ]);
+
+  // Prepare rows with calculated 'thành tiền'
+  const dataRows = jsonData["Thông tin"].map(item => {
+    const unitPrice = parseVietnameseNumber(item["đơn giá"]);
+    const quantity = item["số lượng"];
+    const itemTotal = unitPrice * quantity;
+    return [
+      item["thứ tự"], item["tên mặt hàng"], quantity, unitPrice, itemTotal
+    ];
+  });
+
+  // Add the total amount row at the bottom
   dataRows.push(["", "", "", "Tổng tiền", totalAmount]);
 
+  // Create the second sheet with headers and data
   const sheet2 = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
   XLSX.utils.book_append_sheet(workbook, sheet2, "Danh sách hàng hóa");
 
+  // Specify the file path and save the workbook
   const excelFilePath = `./data_${chatId}.xlsx`;
   XLSX.writeFile(workbook, excelFilePath);
 
   return excelFilePath;
 }
+
 
 async function saveOrderToDatabase(jsonData, sql_connection) {
   const totalAmount = jsonData["Thông tin"].reduce((sum, item) => sum + parseVietnameseNumber(item["thành tiền"]), 0);
@@ -124,7 +144,9 @@ async function saveOrderToDatabase(jsonData, sql_connection) {
   for (const item of jsonData["Thông tin"]) {
     const unitPrice = parseVietnameseNumber(item["đơn giá"]);
     const quantity = item["số lượng"];
+
     const itemTotal = unitPrice * quantity;
+   // console.log(" unitPrice " + unitPrice + " quantity "+ quantity + " itemTotal " + itemTotal)
     await sql_connection.execute(
       "INSERT INTO Order_Items (order_id, item_name, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)",
       [orderId, item["tên mặt hàng"], item["số lượng"], parseVietnameseNumber(item["đơn giá"]),
@@ -136,6 +158,7 @@ async function saveOrderToDatabase(jsonData, sql_connection) {
 bot.on("photo", async (msg) => {
   const chatId = msg.chat.id;
   console.log("📥 Nhận ảnh từ chatID:", chatId);
+  bot.sendMessage(chatId, "📥 Đã nhận ảnh, đang chờ xử lý ...")
 
   try {
     const fileId = msg.photo[msg.photo.length - 1].file_id;
