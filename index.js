@@ -216,6 +216,7 @@ bot.onText(/\/menu/, (msg) => {
       [{ text: "📋 Danh sách Khách Hàng", callback_data: "menu_customers" }],
       [{ text: "📅 Chọn Hóa Đơn theo Ngày", callback_data: "menu_date" }],
       [{ text: "📊 Báo cáo mặt hàng", callback_data: "menu_items" }],
+      [{ text: "📊 Xuất tất cả hóa đơn", callback_data: "menu_all_reports" }],
 
     ]
   };
@@ -247,33 +248,52 @@ bot.on("callback_query", async (callbackQuery) => {
     bot.sendMessage(chatId, "📅 Nhập số ngày muốn tổng hợp dữ liệu:");
     awaitingOrderReportDays[chatId] = true;
   }
+  else if (data === "menu_all_reports") {
+    bot.sendMessage(chatId, "⏳ Đang tổng hợp hóa đơn");
+   
 
-
-});
-
-bot.on("message", async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text ? msg.text.trim().toLowerCase() : "";
-
-  if (text.startsWith("/report")) {
-    const parts = text.split(" ");
-    const days = parseInt(parts[1], 10) || 1; // Mặc định là 1 ngày nếu không có số ngày
-    const excelFilePath = await generateReportForDays(days);
-    bot.sendMessage(chatId, `📊  Đang tổng hợp hóa đơn trong ${days} ngày gần đây.`);
+    // Gọi hàm tạo báo cáo
+    const excelFilePath = await generateAllReports();
 
     if (!excelFilePath) {
-      bot.sendMessage(chatId, `📭 Không có hóa đơn nào trong ${days} ngày gần đây.`);
+      bot.sendMessage(chatId, `📭 Không có hóa đơn nào.`);
       return;
     }
 
     await bot.sendDocument(chatId, excelFilePath, {
-      caption: `📊 Báo cáo hóa đơn trong ${days} ngày gần đây.`,
+      caption: `📊 Báo cáo hóa đơn.`,
       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     });
 
     fs.unlinkSync(excelFilePath);
   }
+
+
 });
+
+// bot.on("message", async (msg) => {
+//   const chatId = msg.chat.id;
+//   const text = msg.text ? msg.text.trim().toLowerCase() : "";
+
+//   if (text.startsWith("/report")) {
+//     const parts = text.split(" ");
+//     const days = parseInt(parts[1], 10) || 1; // Mặc định là 1 ngày nếu không có số ngày
+//     const excelFilePath = await generateReportForDays(days);
+//     bot.sendMessage(chatId, `📊  Đang tổng hợp hóa đơn trong ${days} ngày gần đây.`);
+
+//     if (!excelFilePath) {
+//       bot.sendMessage(chatId, `📭 Không có hóa đơn nào trong ${days} ngày gần đây.`);
+//       return;
+//     }
+
+//     await bot.sendDocument(chatId, excelFilePath, {
+//       caption: `📊 Báo cáo hóa đơn trong ${days} ngày gần đây.`,
+//       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+//     });
+
+//     fs.unlinkSync(excelFilePath);
+//   }
+// });
 
 
 bot.on("message", async (msg) => {
@@ -309,6 +329,7 @@ bot.on("message", async (msg) => {
 
     fs.unlinkSync(excelFilePath);
   }
+  
 });
 
 bot.on("message", async (msg) => {
@@ -622,6 +643,13 @@ const generateReportForDays = async (days) => {
 
   const orders = await fetchOrders("o.order_date >= ?", [formattedStartDate]);
   return generateExcelReport(orders, `./report_${days}_days.xlsx`);
+};
+
+const generateAllReports = async () => {
+  console.log(`📥 Đang tổng hợp tất cả hóa đơn`);
+
+  const orders = await fetchOrders("1 = 1", []); // Không có điều kiện lọc ngày
+  return generateExcelReport(orders, `./report_all.xlsx`);
 };
 
 // Hàm yêu cầu người dùng nhập số ngày
