@@ -25,6 +25,7 @@ const dbConfig = {
 
 TELEGRAM_BOT_PHUONG_TOKEN = "6037137720:AAFBEfCG9xWY4K_3tx7VSZzMXGgmt9-Zdog"
 TELEGRAM_BOT_DAT_TOKEN = "7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
+//BOT_TOKEN = TELEGRAM_BOT_PHUONG_TOKEN//process.env.TELEGRAM_BOT_TOKEN
 BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
@@ -177,7 +178,7 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
       // So sánh nếu tất cả item trùng nhau
       if (JSON.stringify(normalizedExistingItems) === JSON.stringify(normalizedCurrentItems)) {
         console.log(`❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.`);
-        bot.sendMessage(chatId,`❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.` )
+        bot.sendMessage(chatId, `❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.`)
         return true;
       }
     }
@@ -269,6 +270,7 @@ bot.onText(/\/menu/, (msg) => {
       [{ text: "📅 Chọn Hóa Đơn theo Ngày", callback_data: "menu_date" }],
       [{ text: "📊 Báo cáo mặt hàng", callback_data: "menu_items" }],
       [{ text: "📊 Xuất tất cả hóa đơn", callback_data: "menu_all_reports" }],
+      [{ text: "🗑 Xóa hóa đơn", callback_data: "menu_delete_order" }], // ➡️ Thêm m
     ]
   };
 
@@ -318,6 +320,51 @@ bot.on("callback_query", async (callbackQuery) => {
 
     fs.unlinkSync(excelFilePath);
   }
+
+  if (data === "menu_delete_order") {
+    const deleteKeyboard = {
+      inline_keyboard: [
+        [{ text: "🗑 Xóa theo tên khách hàng", callback_data: "delete_by_customer" }],
+        [{ text: "🗑 Xóa theo ID hóa đơn", callback_data: "delete_by_order_id" }],
+        [{ text: "⬅️ Quay lại", callback_data: "menu" }]
+      ]
+    };
+
+    bot.sendMessage(chatId, "🔴 Chọn cách xóa hóa đơn:", { reply_markup: deleteKeyboard });
+  }
+
+  // Lấy danh sách khách hàng để chọn
+  if (data === "delete_by_customer") {
+    await deleteOrderByCustomer(chatId);
+  }
+
+  // Lựa chọn hóa đơn sau khi chọn khách hàng
+  if (data.startsWith("select_customer_")) {
+    const customerId = data.split("_")[2];
+    await deleteAllOrdersByCustomer(chatId, customerId);
+  }
+
+  // Xóa hóa đơn khi chọn từ danh sách
+  if (data.startsWith("delete_order_")) {
+    const orderId = data.split("_")[2];
+
+    db.query("DELETE FROM Orders WHERE id = ?", [orderId], (err, result) => {
+      if (err) {
+        bot.sendMessage(chatId, "❌ Lỗi khi xóa hóa đơn.");
+        console.error(err);
+        return;
+      }
+
+      bot.sendMessage(chatId, `✅ Đã xóa hóa đơn có ID: ${orderId}.`);
+    });
+  }
+
+  // Xóa hóa đơn theo ID nhập tay
+  if (data === "delete_by_order_id") {
+    bot.sendMessage(chatId, "✏️ Nhập ID hóa đơn cần xóa:");
+    userStates[chatId] = "waiting_delete_order_id";
+  }
+
 
 
 });
@@ -381,6 +428,18 @@ bot.on("message", async (msg) => {
     fs.unlinkSync(excelFilePath);
   }
 
+  if (userStates[chatId] === "waiting_delete_order_id") {
+    const orderId = parseInt(text);
+    console.log(" orderId  " + orderId)
+    if (isNaN(orderId)) {
+      bot.sendMessage(chatId, "⚠️ Vui lòng nhập một số hợp lệ.");
+      return;
+    }
+
+    deleteOrderById(chatId, orderId)
+
+    delete userStates[chatId];
+  }
 });
 
 bot.on("message", async (msg) => {
@@ -844,5 +903,103 @@ const clearDatabase = async (chatId) => {
   } catch (err) {
     console.error(`❌ Lỗi khi xóa dữ liệu: ${err.message}`);
     bot.sendMessage(chatId, "❌ Xóa dữ liệu thất bại.");
+  }
+};
+
+// Hàm xóa dữ liệu
+const deleteOrderById = async (chatId, orderId) => {
+  try {
+    if (!orderId || isNaN(orderId)) {
+      bot.sendMessage(chatId, "⚠️ Vui lòng nhập ID hóa đơn hợp lệ.");
+      console.error("❌ Lỗi: orderId không hợp lệ", orderId);
+      return;
+    }
+
+    // Kết nối đến database
+    const connection = await mysql.createConnection(dbConfig);
+
+    // Xóa tất cả Order_Items trước để tránh lỗi khóa ngoại
+    await connection.execute("DELETE FROM Order_Items WHERE order_id = ?", [orderId]);
+
+    // Xóa hóa đơn sau khi xóa Order_Items
+    const [result] = await connection.execute("DELETE FROM Orders WHERE id = ?", [orderId]);
+
+    if (result.affectedRows > 0) {
+      bot.sendMessage(chatId, `✅ Đã xóa hóa đơn ID: ${orderId} và các Order_Items liên quan.`);
+    } else {
+      bot.sendMessage(chatId, "⚠️ Không tìm thấy hóa đơn để xóa.");
+    }
+
+    // Đóng kết nối sau khi hoàn tất
+    await connection.end();
+  } catch (err) {
+    console.error(`❌ Lỗi khi xóa dữ liệu: ${err.message}`);
+    bot.sendMessage(chatId, "❌ Xóa dữ liệu thất bại.");
+  }
+};
+
+
+const deleteOrderByCustomer = async (chatId) => {
+  try {
+    const connection = await mysql.createConnection(dbConfig);
+
+    // Truy vấn danh sách khách hàng
+    const [customers] = await connection.execute("SELECT id, name FROM Customers");
+
+    if (customers.length === 0) {
+      bot.sendMessage(chatId, "⚠️ Không có khách hàng nào.");
+      return;
+    }
+
+    // Tạo các nút chọn khách hàng
+    const customerButtons = customers.map((customer) => [
+      { text: customer.name, callback_data: `select_customer_${customer.id}` }
+    ]);
+
+    const keyboard = { inline_keyboard: customerButtons };
+    bot.sendMessage(chatId, "📌 Chọn khách hàng:", { reply_markup: keyboard });
+
+    await connection.end();
+  } catch (err) {
+    console.error("❌ Lỗi truy vấn database:", err);
+    bot.sendMessage(chatId, "❌ Lỗi truy vấn database.");
+  }
+};
+
+// Xử lý khi chọn khách hàng để xem hóa đơn cần xóa
+const deleteAllOrdersByCustomer = async (chatId, customerId) => {
+  try {
+    const connection = await mysql.createConnection(dbConfig);
+
+    // Lấy danh sách order_id của khách hàng này
+    const [orders] = await connection.execute(
+      "SELECT id FROM Orders WHERE customer_id = ?",
+      [customerId]
+    );
+
+    if (orders.length === 0) {
+      bot.sendMessage(chatId, "⚠️ Khách hàng này không có hóa đơn để xóa.");
+      return;
+    }
+
+    // Lấy danh sách ID đơn hàng
+    const orderIds = orders.map(order => order.id);
+
+    // Xóa Order_Items trước (vì có ràng buộc khóa ngoại)
+    await connection.execute(
+      `DELETE FROM Order_Items WHERE order_id IN (${orderIds.join(",")})`
+    );
+
+    // Xóa Orders
+    await connection.execute(
+      `DELETE FROM Orders WHERE id IN (${orderIds.join(",")})`
+    );
+
+    bot.sendMessage(chatId, `✅ Đã xóa ${orderIds.length} hóa đơn và tất cả mục liên quan.`);
+
+    await connection.end();
+  } catch (err) {
+    console.error("❌ Lỗi khi xóa hóa đơn:", err);
+    bot.sendMessage(chatId, "❌ Xóa hóa đơn thất bại.");
   }
 };
