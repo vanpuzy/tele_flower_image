@@ -115,17 +115,15 @@ function generateExcel(jsonData, chatId) {
 }
 
 
-async function saveOrderToDatabase(jsonData, sql_connection) {
-  const totalAmount = jsonData["Thông tin"].reduce((sum, item) => sum + parseVietnameseNumber(item["thành tiền"]), 0);
+async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
+  const totalAmount = jsonData["Thông tin"].reduce(
+    (sum, item) => sum + parseVietnameseNumber(item["thành tiền"]),
+    0
+  );
   const orderDate = parseVietnameseDate(jsonData["Thời gian"]);
 
-  // const [existingCustomer] = await sql_connection.execute(
-  //   "SELECT id FROM Customers WHERE name = ? AND address = ?",
-  //   [jsonData["Tên khách hàng"], jsonData["Địa chỉ"]]
-  // );
-
   const [existingCustomer] = await sql_connection.execute(
-    "SELECT id FROM Customers WHERE name = ? ",
+    "SELECT id FROM Customers WHERE name = ?",
     [jsonData["Tên khách hàng"]]
   );
 
@@ -140,6 +138,40 @@ async function saveOrderToDatabase(jsonData, sql_connection) {
     customerId = customerResult.insertId;
   }
 
+  // Kiểm tra xem đơn hàng đã tồn tại chưa
+  const [existingOrder] = await sql_connection.execute(
+    "SELECT id FROM Orders WHERE customer_id = ? AND order_date = ? AND totalAmount = ?",
+    [customerId, orderDate, totalAmount]
+  );
+
+  if (existingOrder.length > 0) {
+    const orderId = existingOrder[0].id;
+
+    // Kiểm tra danh sách sản phẩm có trùng hoàn toàn không
+    const [existingItems] = await sql_connection.execute(
+      "SELECT item_name, quantity, unit_price, total_price FROM Order_Items WHERE order_id = ?",
+      [orderId]
+    );
+
+    const currentItems = jsonData["Thông tin"].map((item) => ({
+      item_name: item["tên mặt hàng"],
+      quantity: item["số lượng"],
+      unit_price: parseVietnameseNumber(item["đơn giá"]),
+      total_price: parseVietnameseNumber(item["đơn giá"]) * item["số lượng"],
+    }));
+
+    // Sắp xếp để đảm bảo so sánh chính xác
+    existingItems.sort((a, b) => a.item_name.localeCompare(b.item_name));
+    currentItems.sort((a, b) => a.item_name.localeCompare(b.item_name));
+
+    if (JSON.stringify(existingItems) === JSON.stringify(currentItems)) {
+      console.log("Đơn hàng đã tồn tại, không thêm vào cơ sở dữ liệu.");
+      bot.sendMessage(chatId," Đơn hàng đã tồn tại vui lòng up ảnh khác" )
+      return;
+    }
+  }
+
+  // Nếu không có đơn hàng trùng khớp, tiến hành chèn dữ liệu mới
   const [orderResult] = await sql_connection.execute(
     "INSERT INTO Orders (customer_id, order_date, totalAmount) VALUES (?, ?, ?)",
     [customerId, orderDate, totalAmount]
@@ -149,16 +181,15 @@ async function saveOrderToDatabase(jsonData, sql_connection) {
   for (const item of jsonData["Thông tin"]) {
     const unitPrice = parseVietnameseNumber(item["đơn giá"]);
     const quantity = item["số lượng"];
-
     const itemTotal = unitPrice * quantity;
-   // console.log(" unitPrice " + unitPrice + " quantity "+ quantity + " itemTotal " + itemTotal)
+
     await sql_connection.execute(
       "INSERT INTO Order_Items (order_id, item_name, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)",
-      [orderId, item["tên mặt hàng"], item["số lượng"], parseVietnameseNumber(item["đơn giá"]),
-      itemTotal]
+      [orderId, item["tên mặt hàng"], quantity, unitPrice, itemTotal]
     );
   }
 }
+
 
 bot.on("photo", async (msg) => {
   const chatId = msg.chat.id;
@@ -174,7 +205,7 @@ bot.on("photo", async (msg) => {
     console.log("📤 Phản hồi từ API:", jsonData);
 
     const sql_connection = await mysql.createConnection(dbConfig);
-    await saveOrderToDatabase(jsonData, sql_connection);
+    await saveOrderToDatabase(chatId, jsonData, sql_connection);
     await sql_connection.end();
 
     const excelFilePath = generateExcel(jsonData, chatId);
@@ -673,12 +704,12 @@ async function generateOrderItemReport(chatId, days) {
     }
 
     // 📝 Log dữ liệu ra console
-    console.log("📌 Dữ liệu báo cáo mặt hàng:");
-    rows.forEach((row, index) => {
-      console.log(
-        `${index + 1}. ${row.item_name} - Đơn giá: ${row.unit_price} VND - Số lượng: ${row.total_quantity} - Tổng tiền: ${row.total_price} VND`
-      );
-    });
+    // console.log("📌 Dữ liệu báo cáo mặt hàng:");
+    // rows.forEach((row, index) => {
+    //   console.log(
+    //     `${index + 1}. ${row.item_name} - Đơn giá: ${row.unit_price} VND - Số lượng: ${row.total_quantity} - Tổng tiền: ${row.total_price} VND`
+    //   );
+    // });
 
     // Tạo workbook và worksheet
     const worksheetData = [
