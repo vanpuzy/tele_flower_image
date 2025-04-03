@@ -123,6 +123,7 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
   );
   const orderDate = parseVietnameseDate(jsonData["Thời gian"]);
 
+  // Kiểm tra xem khách hàng đã tồn tại chưa
   const [existingCustomer] = await sql_connection.execute(
     "SELECT id FROM Customers WHERE name = ?",
     [jsonData["Tên khách hàng"]]
@@ -139,47 +140,50 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
     customerId = customerResult.insertId;
   }
 
-  
-  // Lấy tất cả đơn hàng có cùng khách hàng, ngày, và tổng tiền
+  // Lấy danh sách đơn hàng có cùng khách hàng, ngày, và tổng tiền
   const [existingOrders] = await sql_connection.execute(
     "SELECT id FROM Orders WHERE customer_id = ? AND order_date = ? AND totalAmount = ?",
     [customerId, orderDate, totalAmount]
   );
 
+  // Chuẩn hóa danh sách sản phẩm
+  const normalizeItems = (items) => {
+    return items.map(item => ({
+      item_name: (item.item_name ? item.item_name.trim().toLowerCase() : "unknown item"), 
+      quantity: Number(item.quantity),
+      unit_price: Number(item.unit_price),
+      total_price: Number(item.total_price),
+    })).sort((a, b) => a.item_name.localeCompare(b.item_name) || a.unit_price - b.unit_price);
+  };
+
+  // Chuẩn hóa danh sách sản phẩm từ jsonData
+  const normalizedCurrentItems = normalizeItems(jsonData["Thông tin"].map(item => ({
+    item_name: item["tên mặt hàng"] ? item["tên mặt hàng"].trim().toLowerCase() : "unknown item",
+    quantity: item["số lượng"],
+    unit_price: parseVietnameseNumber(item["đơn giá"]),
+    total_price: parseVietnameseNumber(item["đơn giá"]) * item["số lượng"],
+  })));
+
   if (existingOrders.length > 0) {
     for (const order of existingOrders) {
       const orderId = order.id;
 
+      // Lấy danh sách sản phẩm của đơn hàng trong DB
       const [existingItems] = await sql_connection.execute(
         "SELECT item_name, quantity, unit_price, total_price FROM Order_Items WHERE order_id = ?",
         [orderId]
       );
 
-      const normalizeItems = (items) => {
-        return items.map(item => ({
-          item_name: item.item_name.trim().toLowerCase(), // So sánh không phân biệt hoa thường
-          quantity: Number(item.quantity),
-          unit_price: Number(item.unit_price),
-          total_price: Number(item.total_price),
-        })).sort((a, b) => a.item_name.localeCompare(b.item_name) || a.unit_price - b.unit_price);
-      };
-
       const normalizedExistingItems = normalizeItems(existingItems);
-      const normalizedCurrentItems = normalizeItems(jsonData["Thông tin"].map(item => ({
-        item_name: item["tên mặt hàng"] ? item["tên mặt hàng"].trim().toLowerCase() : "unknown item",
-        quantity: item["số lượng"],
-        unit_price: parseVietnameseNumber(item["đơn giá"]),
-        total_price: parseVietnameseNumber(item["đơn giá"]) * item["số lượng"],
-      })));
 
       console.log(`🔹 So sánh với đơn hàng ID: ${orderId}`);
-      // console.log("🔹 Existing Items:", JSON.stringify(normalizedExistingItems, null, 2));
-      // console.log("🔹 Current Items:", JSON.stringify(normalizedCurrentItems, null, 2));
+      console.log("🔹 Existing Items:", JSON.stringify(normalizedExistingItems, null, 2));
+      console.log("🔹 Current Items:", JSON.stringify(normalizedCurrentItems, null, 2));
 
-      // So sánh nếu tất cả item trùng nhau
+      // Kiểm tra trùng lặp
       if (JSON.stringify(normalizedExistingItems) === JSON.stringify(normalizedCurrentItems)) {
         console.log(`❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.`);
-        bot.sendMessage(chatId, `❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.`)
+        bot.sendMessage(chatId, `❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.`);
         return true;
       }
     }
@@ -194,6 +198,7 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
   );
   const orderId = orderResult.insertId;
 
+  // Thêm sản phẩm vào Order_Items
   for (const item of jsonData["Thông tin"]) {
     const unitPrice = parseVietnameseNumber(item["đơn giá"]);
     const quantity = item["số lượng"];
@@ -201,15 +206,15 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
 
     await sql_connection.execute(
       "INSERT INTO Order_Items (order_id, item_name, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)",
-      [orderId,
+      [orderId, 
         item["tên mặt hàng"] ? item["tên mặt hàng"].trim() : "unknown item",
-       quantity, unitPrice, itemTotal]
+        quantity, unitPrice, itemTotal
+      ]
     );
   }
 
   return false;
 }
-
 
 
 bot.on("photo", async (msg) => {
