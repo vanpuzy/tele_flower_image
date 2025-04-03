@@ -149,7 +149,7 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
   // Chuẩn hóa danh sách sản phẩm
   const normalizeItems = (items) => {
     return items.map(item => ({
-      item_name: (item.item_name ? item.item_name.trim().toLowerCase() : "unknown item"), 
+      item_name: (item.item_name ? item.item_name.trim().toLowerCase() : "unknown item"),
       quantity: Number(item.quantity),
       unit_price: Number(item.unit_price),
       total_price: Number(item.total_price),
@@ -206,7 +206,7 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
 
     await sql_connection.execute(
       "INSERT INTO Order_Items (order_id, item_name, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)",
-      [orderId, 
+      [orderId,
         item["tên mặt hàng"] ? item["tên mặt hàng"].trim() : "unknown item",
         quantity, unitPrice, itemTotal
       ]
@@ -228,7 +228,7 @@ bot.on("photo", async (msg) => {
     console.log("✅ Ảnh đã tải về:", filePath);
 
     const jsonData = await uploadPhoto(filePath, apiUrl);
-     console.log("📤 Phản hồi từ API:", jsonData);
+    console.log("📤 Phản hồi từ API:", jsonData);
 
     const sql_connection = await mysql.createConnection(dbConfig);
     const isDuplicate = await saveOrderToDatabase(chatId, jsonData, sql_connection);
@@ -470,25 +470,30 @@ bot.on("message", async (msg) => {
 
 // bot.onText(/\/khachhang/, async (msg) => {
 async function handleCustomersRequest(chatId) {
-  // const chatId = msg.chat.id;
-
   try {
     const connection = await mysql.createConnection(dbConfig);
-    const [customers] = await connection.execute("SELECT id, name FROM Customers");
+
+    // Chỉ lấy khách hàng có ít nhất 1 đơn hàng
+    const [customers] = await connection.execute(
+      `SELECT DISTINCT c.id, c.name 
+         FROM Customers c
+         INNER JOIN Orders o ON c.id = o.customer_id`
+    );
 
     if (customers.length === 0) {
-      return bot.sendMessage(chatId, "❌ Không có khách hàng nào trong database.");
+      return bot.sendMessage(chatId, "❌ Không có khách hàng nào có hóa đơn trong database.");
     }
-    console.log("Danh sách khách hàng từ database:", customers);
+
+    console.log("Danh sách khách hàng có hóa đơn từ database:", customers);
+
     // Tạo Inline Keyboard
     const keyboard = {
       inline_keyboard: customers.map((customer) => [
-
         { text: customer.name, callback_data: `customer_${customer.id}_${customer.name}` },
       ]),
     };
 
-    bot.sendMessage(chatId, "📋 Danh sách khách hàng:", {
+    bot.sendMessage(chatId, "📋 Danh sách khách hàng có hóa đơn:", {
       reply_markup: keyboard,
     });
 
@@ -498,6 +503,7 @@ async function handleCustomersRequest(chatId) {
     bot.sendMessage(chatId, "❌ Lỗi khi lấy danh sách khách hàng.");
   }
 }
+
 // });
 
 // bot.onText(/\/chonngay/, (msg) => {
