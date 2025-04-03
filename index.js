@@ -139,6 +139,7 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
     customerId = customerResult.insertId;
   }
 
+  
   // Lấy tất cả đơn hàng có cùng khách hàng, ngày, và tổng tiền
   const [existingOrders] = await sql_connection.execute(
     "SELECT id FROM Orders WHERE customer_id = ? AND order_date = ? AND totalAmount = ?",
@@ -220,7 +221,7 @@ bot.on("photo", async (msg) => {
     console.log("✅ Ảnh đã tải về:", filePath);
 
     const jsonData = await uploadPhoto(filePath, apiUrl);
-    // console.log("📤 Phản hồi từ API:", jsonData);
+     console.log("📤 Phản hồi từ API:", jsonData);
 
     const sql_connection = await mysql.createConnection(dbConfig);
     const isDuplicate = await saveOrderToDatabase(chatId, jsonData, sql_connection);
@@ -599,7 +600,11 @@ function parseVietnameseDate(dateString) {
   const months = {
     "tháng 1": "01", "tháng 2": "02", "tháng 3": "03", "tháng 4": "04",
     "tháng 5": "05", "tháng 6": "06", "tháng 7": "07", "tháng 8": "08",
-    "tháng 9": "09", "tháng 10": "10", "tháng 11": "11", "tháng 12": "12"
+    "tháng 9": "09", "tháng 10": "10", "tháng 11": "11", "tháng 12": "12",
+
+    "tháng 01": "01", "tháng 02": "02", "tháng 03": "03", "tháng 04": "04",
+    "tháng 05": "05", "tháng 06": "06", "tháng 07": "07", "tháng 08": "08",
+    "tháng 09": "09"
   };
 
   // Tìm các phần Ngày, Tháng, Năm
