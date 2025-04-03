@@ -166,8 +166,9 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
 
     if (JSON.stringify(existingItems) === JSON.stringify(currentItems)) {
       console.log("Đơn hàng đã tồn tại, không thêm vào cơ sở dữ liệu.");
-      bot.sendMessage(chatId," Đơn hàng đã tồn tại vui lòng up ảnh khác" )
-      return;
+      bot.sendMessage(chatId, " Đơn hàng đã tồn tại vui lòng up ảnh khác")
+
+      return true;
     }
   }
 
@@ -188,6 +189,8 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
       [orderId, item["tên mặt hàng"], quantity, unitPrice, itemTotal]
     );
   }
+
+  return false;
 }
 
 
@@ -205,18 +208,22 @@ bot.on("photo", async (msg) => {
     console.log("📤 Phản hồi từ API:", jsonData);
 
     const sql_connection = await mysql.createConnection(dbConfig);
-    await saveOrderToDatabase(chatId, jsonData, sql_connection);
+    const isDuplicate = await saveOrderToDatabase(chatId, jsonData, sql_connection);
     await sql_connection.end();
 
-    const excelFilePath = generateExcel(jsonData, chatId);
-    console.log("✅ File Excel đã tạo:", excelFilePath);
+    if (!isDuplicate) {
+      const excelFilePath = generateExcel(jsonData, chatId);
+      console.log("✅ File Excel đã tạo:", excelFilePath);
 
-    await bot.sendDocument(chatId, excelFilePath, {
-      caption: "✅ File Excel đã được tạo!",
-      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    });
+      await bot.sendDocument(chatId, excelFilePath, {
+        caption: "✅ File Excel đã được tạo!",
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      });
 
-    fs.unlinkSync(excelFilePath);
+      fs.unlinkSync(excelFilePath);
+    } else {
+
+    }
   } catch (error) {
     console.error("❌ Lỗi:", error);
     bot.sendMessage(chatId, "❌ Có lỗi xảy ra khi xử lý ảnh.");
@@ -281,7 +288,7 @@ bot.on("callback_query", async (callbackQuery) => {
   }
   else if (data === "menu_all_reports") {
     bot.sendMessage(chatId, "⏳ Đang tổng hợp hóa đơn");
-   
+
 
     // Gọi hàm tạo báo cáo
     const excelFilePath = await generateAllReports();
@@ -360,7 +367,7 @@ bot.on("message", async (msg) => {
 
     fs.unlinkSync(excelFilePath);
   }
-  
+
 });
 
 bot.on("message", async (msg) => {
@@ -396,7 +403,7 @@ async function handleCustomersRequest(chatId) {
     // Tạo Inline Keyboard
     const keyboard = {
       inline_keyboard: customers.map((customer) => [
-    
+
         { text: customer.name, callback_data: `customer_${customer.id}_${customer.name}` },
       ]),
     };
