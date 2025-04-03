@@ -205,7 +205,7 @@ bot.on("photo", async (msg) => {
     console.log("✅ Ảnh đã tải về:", filePath);
 
     const jsonData = await uploadPhoto(filePath, apiUrl);
-    console.log("📤 Phản hồi từ API:", jsonData);
+    // console.log("📤 Phản hồi từ API:", jsonData);
 
     const sql_connection = await mysql.createConnection(dbConfig);
     const isDuplicate = await saveOrderToDatabase(chatId, jsonData, sql_connection);
