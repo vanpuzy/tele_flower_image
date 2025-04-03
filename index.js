@@ -166,7 +166,7 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
 
       const normalizedExistingItems = normalizeItems(existingItems);
       const normalizedCurrentItems = normalizeItems(jsonData["Thông tin"].map(item => ({
-        item_name: item["tên mặt hàng"].trim().toLowerCase(),
+        item_name: item["tên mặt hàng"] ? item["tên mặt hàng"].trim().toLowerCase() : "unknown item",
         quantity: item["số lượng"],
         unit_price: parseVietnameseNumber(item["đơn giá"]),
         total_price: parseVietnameseNumber(item["đơn giá"]) * item["số lượng"],
@@ -201,7 +201,9 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
 
     await sql_connection.execute(
       "INSERT INTO Order_Items (order_id, item_name, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)",
-      [orderId, item["tên mặt hàng"], quantity, unitPrice, itemTotal]
+      [orderId,
+        item["tên mặt hàng"] ? item["tên mặt hàng"].trim() : "unknown item",
+       quantity, unitPrice, itemTotal]
     );
   }
 
