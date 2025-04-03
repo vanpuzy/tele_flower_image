@@ -138,41 +138,54 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
     customerId = customerResult.insertId;
   }
 
-  // Kiểm tra xem đơn hàng đã tồn tại chưa
-  const [existingOrder] = await sql_connection.execute(
+  // Lấy tất cả đơn hàng có cùng khách hàng, ngày, và tổng tiền
+  const [existingOrders] = await sql_connection.execute(
     "SELECT id FROM Orders WHERE customer_id = ? AND order_date = ? AND totalAmount = ?",
     [customerId, orderDate, totalAmount]
   );
 
-  if (existingOrder.length > 0) {
-    const orderId = existingOrder[0].id;
+  if (existingOrders.length > 0) {
+    for (const order of existingOrders) {
+      const orderId = order.id;
 
-    // Kiểm tra danh sách sản phẩm có trùng hoàn toàn không
-    const [existingItems] = await sql_connection.execute(
-      "SELECT item_name, quantity, unit_price, total_price FROM Order_Items WHERE order_id = ?",
-      [orderId]
-    );
+      const [existingItems] = await sql_connection.execute(
+        "SELECT item_name, quantity, unit_price, total_price FROM Order_Items WHERE order_id = ?",
+        [orderId]
+      );
 
-    const currentItems = jsonData["Thông tin"].map((item) => ({
-      item_name: item["tên mặt hàng"],
-      quantity: item["số lượng"],
-      unit_price: parseVietnameseNumber(item["đơn giá"]),
-      total_price: parseVietnameseNumber(item["đơn giá"]) * item["số lượng"],
-    }));
+      const normalizeItems = (items) => {
+        return items.map(item => ({
+          item_name: item.item_name.trim().toLowerCase(), // So sánh không phân biệt hoa thường
+          quantity: Number(item.quantity),
+          unit_price: Number(item.unit_price),
+          total_price: Number(item.total_price),
+        })).sort((a, b) => a.item_name.localeCompare(b.item_name) || a.unit_price - b.unit_price);
+      };
 
-    // Sắp xếp để đảm bảo so sánh chính xác
-    existingItems.sort((a, b) => a.item_name.localeCompare(b.item_name));
-    currentItems.sort((a, b) => a.item_name.localeCompare(b.item_name));
+      const normalizedExistingItems = normalizeItems(existingItems);
+      const normalizedCurrentItems = normalizeItems(jsonData["Thông tin"].map(item => ({
+        item_name: item["tên mặt hàng"].trim().toLowerCase(),
+        quantity: item["số lượng"],
+        unit_price: parseVietnameseNumber(item["đơn giá"]),
+        total_price: parseVietnameseNumber(item["đơn giá"]) * item["số lượng"],
+      })));
 
-    if (JSON.stringify(existingItems) === JSON.stringify(currentItems)) {
-      console.log("Đơn hàng đã tồn tại, không thêm vào cơ sở dữ liệu.");
-      bot.sendMessage(chatId, " Đơn hàng đã tồn tại vui lòng up ảnh khác")
+      console.log(`🔹 So sánh với đơn hàng ID: ${orderId}`);
+      // console.log("🔹 Existing Items:", JSON.stringify(normalizedExistingItems, null, 2));
+      // console.log("🔹 Current Items:", JSON.stringify(normalizedCurrentItems, null, 2));
 
-      return true;
+      // So sánh nếu tất cả item trùng nhau
+      if (JSON.stringify(normalizedExistingItems) === JSON.stringify(normalizedCurrentItems)) {
+        console.log(`❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.`);
+        bot.sendMessage(chatId,`❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.` )
+        return true;
+      }
     }
   }
 
-  // Nếu không có đơn hàng trùng khớp, tiến hành chèn dữ liệu mới
+  console.log("✅ Không tìm thấy đơn hàng trùng, thêm mới đơn hàng...");
+
+  // Nếu không tìm thấy đơn hàng trùng, thêm đơn hàng mới
   const [orderResult] = await sql_connection.execute(
     "INSERT INTO Orders (customer_id, order_date, totalAmount) VALUES (?, ?, ?)",
     [customerId, orderDate, totalAmount]
@@ -192,6 +205,7 @@ async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
 
   return false;
 }
+
 
 
 bot.on("photo", async (msg) => {
@@ -255,7 +269,6 @@ bot.onText(/\/menu/, (msg) => {
       [{ text: "📅 Chọn Hóa Đơn theo Ngày", callback_data: "menu_date" }],
       [{ text: "📊 Báo cáo mặt hàng", callback_data: "menu_items" }],
       [{ text: "📊 Xuất tất cả hóa đơn", callback_data: "menu_all_reports" }],
-
     ]
   };
 
