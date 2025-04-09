@@ -25,7 +25,7 @@ const dbConfig = {
 
 TELEGRAM_BOT_PHUONG_TOKEN = "6037137720:AAFBEfCG9xWY4K_3tx7VSZzMXGgmt9-Zdog"
 TELEGRAM_BOT_DAT_TOKEN = "7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
-BOT_TOKEN = TELEGRAM_BOT_DAT_TOKEN//process.env.TELEGRAM_BOT_TOKEN
+BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // API URL nhận file
@@ -133,7 +133,7 @@ async function saveOrderToDatabase(jsonData, sql_connection) {
 bot.on("photo", async (msg) => {
   const chatId = msg.chat.id;
   console.log("📥 Nhận ảnh từ chatID:", chatId);
-
+  await bot.sendMessage(chatId, "Đã nhận ảnh, đang chờ xử lý ...")
   try {
     const fileId = msg.photo[msg.photo.length - 1].file_id;
     const filePath = await downloadPhoto(fileId, chatId, bot, BOT_TOKEN);
