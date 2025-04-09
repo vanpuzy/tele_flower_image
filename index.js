@@ -25,7 +25,9 @@ const dbConfig = {
 
 TELEGRAM_BOT_PHUONG_TOKEN = "6037137720:AAFBEfCG9xWY4K_3tx7VSZzMXGgmt9-Zdog"
 TELEGRAM_BOT_DAT_TOKEN = "7730662102:AAGqaftCXkjvX8QpDAJvtFpqvR59z6AfYJU"
-BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+//BOT_TOKEN = TELEGRAM_BOT_PHUONG_TOKEN//process.env.TELEGRAM_BOT_TOKEN
+BOT_TOKEN = TELEGRAM_BOT_DAT_TOKEN
+//BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // API URL nhận file
@@ -68,8 +70,16 @@ async function uploadPhoto(filePath, apiUrl) {
 
 function generateExcel(jsonData, chatId) {
   const workbook = XLSX.utils.book_new();
-  const totalAmount = jsonData["Thông tin"].reduce((sum, item) => sum + parseVietnameseNumber(item["thành tiền"]), 0);
 
+  // Calculate totalAmount as the sum of quantity * unit price for each item
+  const totalAmount = jsonData["Thông tin"].reduce((sum, item) => {
+    const unitPrice = parseVietnameseNumber(item["đơn giá"]);
+    const quantity = item["số lượng"];
+    const itemTotal = unitPrice * quantity;
+    return sum + itemTotal;
+  }, 0);
+
+  // Prepare customer data for the first sheet
   const customerData = [
     ["Tên khách hàng", jsonData["Tên khách hàng"]],
     ["Địa chỉ", jsonData["Địa chỉ"]],
@@ -79,29 +89,45 @@ function generateExcel(jsonData, chatId) {
   const sheet1 = XLSX.utils.aoa_to_sheet(customerData);
   XLSX.utils.book_append_sheet(workbook, sheet1, "Khách hàng");
 
+  // Prepare headers for the second sheet
   const headers = ["Thứ tự", "Tên mặt hàng", "Số lượng", "Đơn giá", "Thành tiền"];
-  const dataRows = jsonData["Thông tin"].map(item => [
-    item["thứ tự"], item["tên mặt hàng"], item["số lượng"], parseVietnameseNumber(item["đơn giá"]),
-    parseVietnameseNumber(item["thành tiền"])
-  ]);
+
+  // Prepare rows with calculated 'thành tiền'
+  const dataRows = jsonData["Thông tin"].map(item => {
+    const unitPrice = parseVietnameseNumber(item["đơn giá"]);
+    const quantity = item["số lượng"];
+    const itemTotal = unitPrice * quantity;
+    return [
+      item["thứ tự"], item["tên mặt hàng"], quantity, unitPrice, itemTotal
+    ];
+  });
+
+  // Add the total amount row at the bottom
   dataRows.push(["", "", "", "Tổng tiền", totalAmount]);
 
+  // Create the second sheet with headers and data
   const sheet2 = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
   XLSX.utils.book_append_sheet(workbook, sheet2, "Danh sách hàng hóa");
 
+  // Specify the file path and save the workbook
   const excelFilePath = `./data_${chatId}.xlsx`;
   XLSX.writeFile(workbook, excelFilePath);
 
   return excelFilePath;
 }
 
-async function saveOrderToDatabase(jsonData, sql_connection) {
-  const totalAmount = jsonData["Thông tin"].reduce((sum, item) => sum + parseVietnameseNumber(item["thành tiền"]), 0);
+
+async function saveOrderToDatabase(chatId, jsonData, sql_connection) {
+  const totalAmount = jsonData["Thông tin"].reduce(
+    (sum, item) => sum + parseVietnameseNumber(item["thành tiền"]),
+    0
+  );
   const orderDate = parseVietnameseDate(jsonData["Thời gian"]);
 
+  // Kiểm tra xem khách hàng đã tồn tại chưa
   const [existingCustomer] = await sql_connection.execute(
-    "SELECT id FROM Customers WHERE name = ? AND address = ?",
-    [jsonData["Tên khách hàng"], jsonData["Địa chỉ"]]
+    "SELECT id FROM Customers WHERE name = ?",
+    [jsonData["Tên khách hàng"]]
   );
 
   let customerId;
@@ -115,25 +141,88 @@ async function saveOrderToDatabase(jsonData, sql_connection) {
     customerId = customerResult.insertId;
   }
 
+  // Lấy danh sách đơn hàng có cùng khách hàng, ngày, và tổng tiền
+  const [existingOrders] = await sql_connection.execute(
+    "SELECT id FROM Orders WHERE customer_id = ? AND order_date = ? AND totalAmount = ?",
+    [customerId, orderDate, totalAmount]
+  );
+
+  // Chuẩn hóa danh sách sản phẩm
+  const normalizeItems = (items) => {
+    return items.map(item => ({
+      item_name: (item.item_name ? item.item_name.trim().toLowerCase() : "unknown item"),
+      quantity: Number(item.quantity),
+      unit_price: Number(item.unit_price),
+      total_price: Number(item.total_price),
+    })).sort((a, b) => a.item_name.localeCompare(b.item_name) || a.unit_price - b.unit_price);
+  };
+
+  // Chuẩn hóa danh sách sản phẩm từ jsonData
+  const normalizedCurrentItems = normalizeItems(jsonData["Thông tin"].map(item => ({
+    item_name: item["tên mặt hàng"] ? item["tên mặt hàng"].trim().toLowerCase() : "unknown item",
+    quantity: item["số lượng"],
+    unit_price: parseVietnameseNumber(item["đơn giá"]),
+    total_price: parseVietnameseNumber(item["đơn giá"]) * item["số lượng"],
+  })));
+
+  if (existingOrders.length > 0) {
+    for (const order of existingOrders) {
+      const orderId = order.id;
+
+      // Lấy danh sách sản phẩm của đơn hàng trong DB
+      const [existingItems] = await sql_connection.execute(
+        "SELECT item_name, quantity, unit_price, total_price FROM Order_Items WHERE order_id = ?",
+        [orderId]
+      );
+
+      const normalizedExistingItems = normalizeItems(existingItems);
+
+      console.log(`🔹 So sánh với đơn hàng ID: ${orderId}`);
+      console.log("🔹 Existing Items:", JSON.stringify(normalizedExistingItems, null, 2));
+      console.log("🔹 Current Items:", JSON.stringify(normalizedCurrentItems, null, 2));
+
+      // Kiểm tra trùng lặp
+      if (JSON.stringify(normalizedExistingItems) === JSON.stringify(normalizedCurrentItems)) {
+        console.log(`❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.`);
+        bot.sendMessage(chatId, `❌ Đơn hàng đã tồn tại với ID: ${orderId}, không thêm vào cơ sở dữ liệu.`);
+        return true;
+      }
+    }
+  }
+
+  console.log("✅ Không tìm thấy đơn hàng trùng, thêm mới đơn hàng...");
+
+  // Nếu không tìm thấy đơn hàng trùng, thêm đơn hàng mới
   const [orderResult] = await sql_connection.execute(
     "INSERT INTO Orders (customer_id, order_date, totalAmount) VALUES (?, ?, ?)",
     [customerId, orderDate, totalAmount]
   );
   const orderId = orderResult.insertId;
 
+  // Thêm sản phẩm vào Order_Items
   for (const item of jsonData["Thông tin"]) {
+    const unitPrice = parseVietnameseNumber(item["đơn giá"]);
+    const quantity = item["số lượng"];
+    const itemTotal = unitPrice * quantity;
+
     await sql_connection.execute(
       "INSERT INTO Order_Items (order_id, item_name, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)",
-      [orderId, item["tên mặt hàng"], item["số lượng"], parseVietnameseNumber(item["đơn giá"]),
-        parseVietnameseNumber(item["thành tiền"])]
+      [orderId,
+        item["tên mặt hàng"] ? item["tên mặt hàng"].trim() : "unknown item",
+        quantity, unitPrice, itemTotal
+      ]
     );
   }
+
+  return false;
 }
+
 
 bot.on("photo", async (msg) => {
   const chatId = msg.chat.id;
   console.log("📥 Nhận ảnh từ chatID:", chatId);
-  await bot.sendMessage(chatId, "Đã nhận ảnh, đang chờ xử lý ...")
+  bot.sendMessage(chatId, "📥 Đã nhận ảnh, đang chờ xử lý ...")
+
   try {
     const fileId = msg.photo[msg.photo.length - 1].file_id;
     const filePath = await downloadPhoto(fileId, chatId, bot, BOT_TOKEN);
@@ -143,18 +232,22 @@ bot.on("photo", async (msg) => {
     console.log("📤 Phản hồi từ API:", jsonData);
 
     const sql_connection = await mysql.createConnection(dbConfig);
-    await saveOrderToDatabase(jsonData, sql_connection);
+    const isDuplicate = await saveOrderToDatabase(chatId, jsonData, sql_connection);
     await sql_connection.end();
 
-    const excelFilePath = generateExcel(jsonData, chatId);
-    console.log("✅ File Excel đã tạo:", excelFilePath);
+    if (!isDuplicate) {
+      const excelFilePath = generateExcel(jsonData, chatId);
+      console.log("✅ File Excel đã tạo:", excelFilePath);
 
-    await bot.sendDocument(chatId, excelFilePath, {
-      caption: "✅ File Excel đã được tạo!",
-      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    });
+      await bot.sendDocument(chatId, excelFilePath, {
+        caption: "✅ File Excel đã được tạo!",
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      });
 
-    fs.unlinkSync(excelFilePath);
+      fs.unlinkSync(excelFilePath);
+    } else {
+
+    }
   } catch (error) {
     console.error("❌ Lỗi:", error);
     bot.sendMessage(chatId, "❌ Có lỗi xảy ra khi xử lý ảnh.");
@@ -185,7 +278,8 @@ bot.onText(/\/menu/, (msg) => {
       [{ text: "📋 Danh sách Khách Hàng", callback_data: "menu_customers" }],
       [{ text: "📅 Chọn Hóa Đơn theo Ngày", callback_data: "menu_date" }],
       [{ text: "📊 Báo cáo mặt hàng", callback_data: "menu_items" }],
-
+      [{ text: "📊 Xuất tất cả hóa đơn", callback_data: "menu_all_reports" }],
+      [{ text: "🗑 Xóa hóa đơn", callback_data: "menu_delete_order" }], // ➡️ Thêm m
     ]
   };
 
@@ -216,33 +310,97 @@ bot.on("callback_query", async (callbackQuery) => {
     bot.sendMessage(chatId, "📅 Nhập số ngày muốn tổng hợp dữ liệu:");
     awaitingOrderReportDays[chatId] = true;
   }
+  else if (data === "menu_all_reports") {
+    bot.sendMessage(chatId, "⏳ Đang tổng hợp hóa đơn");
 
 
-});
-
-bot.on("message", async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text ? msg.text.trim().toLowerCase() : "";
-
-  if (text.startsWith("/report")) {
-    const parts = text.split(" ");
-    const days = parseInt(parts[1], 10) || 1; // Mặc định là 1 ngày nếu không có số ngày
-    const excelFilePath = await generateReportForDays(days);
-    bot.sendMessage(chatId, `📊  Đang tổng hợp hóa đơn trong ${days} ngày gần đây.`);
+    // Gọi hàm tạo báo cáo
+    const excelFilePath = await generateAllReports();
 
     if (!excelFilePath) {
-      bot.sendMessage(chatId, `📭 Không có hóa đơn nào trong ${days} ngày gần đây.`);
+      bot.sendMessage(chatId, `📭 Không có hóa đơn nào.`);
       return;
     }
 
     await bot.sendDocument(chatId, excelFilePath, {
-      caption: `📊 Báo cáo hóa đơn trong ${days} ngày gần đây.`,
+      caption: `📊 Báo cáo hóa đơn.`,
       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     });
 
     fs.unlinkSync(excelFilePath);
   }
+
+  if (data === "menu_delete_order") {
+    const deleteKeyboard = {
+      inline_keyboard: [
+        [{ text: "🗑 Xóa theo tên khách hàng", callback_data: "delete_by_customer" }],
+        [{ text: "🗑 Xóa theo ID hóa đơn", callback_data: "delete_by_order_id" }],
+        [{ text: "⬅️ Quay lại", callback_data: "menu" }]
+      ]
+    };
+
+    bot.sendMessage(chatId, "🔴 Chọn cách xóa hóa đơn:", { reply_markup: deleteKeyboard });
+  }
+
+  // Lấy danh sách khách hàng để chọn
+  if (data === "delete_by_customer") {
+    await deleteOrderByCustomer(chatId);
+  }
+
+  // Lựa chọn hóa đơn sau khi chọn khách hàng
+  if (data.startsWith("select_customer_")) {
+    const customerId = data.split("_")[2];
+    await deleteAllOrdersByCustomer(chatId, customerId);
+  }
+
+  // Xóa hóa đơn khi chọn từ danh sách
+  if (data.startsWith("delete_order_")) {
+    const orderId = data.split("_")[2];
+
+    db.query("DELETE FROM Orders WHERE id = ?", [orderId], (err, result) => {
+      if (err) {
+        bot.sendMessage(chatId, "❌ Lỗi khi xóa hóa đơn.");
+        console.error(err);
+        return;
+      }
+
+      bot.sendMessage(chatId, `✅ Đã xóa hóa đơn có ID: ${orderId}.`);
+    });
+  }
+
+  // Xóa hóa đơn theo ID nhập tay
+  if (data === "delete_by_order_id") {
+    bot.sendMessage(chatId, "✏️ Nhập ID hóa đơn cần xóa:");
+    userStates[chatId] = "waiting_delete_order_id";
+  }
+
+
+
 });
+
+// bot.on("message", async (msg) => {
+//   const chatId = msg.chat.id;
+//   const text = msg.text ? msg.text.trim().toLowerCase() : "";
+
+//   if (text.startsWith("/report")) {
+//     const parts = text.split(" ");
+//     const days = parseInt(parts[1], 10) || 1; // Mặc định là 1 ngày nếu không có số ngày
+//     const excelFilePath = await generateReportForDays(days);
+//     bot.sendMessage(chatId, `📊  Đang tổng hợp hóa đơn trong ${days} ngày gần đây.`);
+
+//     if (!excelFilePath) {
+//       bot.sendMessage(chatId, `📭 Không có hóa đơn nào trong ${days} ngày gần đây.`);
+//       return;
+//     }
+
+//     await bot.sendDocument(chatId, excelFilePath, {
+//       caption: `📊 Báo cáo hóa đơn trong ${days} ngày gần đây.`,
+//       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+//     });
+
+//     fs.unlinkSync(excelFilePath);
+//   }
+// });
 
 
 bot.on("message", async (msg) => {
@@ -278,6 +436,19 @@ bot.on("message", async (msg) => {
 
     fs.unlinkSync(excelFilePath);
   }
+
+  if (userStates[chatId] === "waiting_delete_order_id") {
+    const orderId = parseInt(text);
+    console.log(" orderId  " + orderId)
+    if (isNaN(orderId)) {
+      bot.sendMessage(chatId, "⚠️ Vui lòng nhập một số hợp lệ.");
+      return;
+    }
+
+    deleteOrderById(chatId, orderId)
+
+    delete userStates[chatId];
+  }
 });
 
 bot.on("message", async (msg) => {
@@ -300,15 +471,21 @@ bot.on("message", async (msg) => {
 
 // bot.onText(/\/khachhang/, async (msg) => {
 async function handleCustomersRequest(chatId) {
-  // const chatId = msg.chat.id;
-
   try {
     const connection = await mysql.createConnection(dbConfig);
-    const [customers] = await connection.execute("SELECT id, name FROM Customers");
+
+    // Chỉ lấy khách hàng có ít nhất 1 đơn hàng
+    const [customers] = await connection.execute(
+      `SELECT DISTINCT c.id, c.name 
+         FROM Customers c
+         INNER JOIN Orders o ON c.id = o.customer_id`
+    );
 
     if (customers.length === 0) {
-      return bot.sendMessage(chatId, "❌ Không có khách hàng nào trong database.");
+      return bot.sendMessage(chatId, "❌ Không có khách hàng nào có hóa đơn trong database.");
     }
+
+    console.log("Danh sách khách hàng có hóa đơn từ database:", customers);
 
     // Tạo Inline Keyboard
     const keyboard = {
@@ -317,7 +494,7 @@ async function handleCustomersRequest(chatId) {
       ]),
     };
 
-    bot.sendMessage(chatId, "📋 Danh sách khách hàng:", {
+    bot.sendMessage(chatId, "📋 Danh sách khách hàng có hóa đơn:", {
       reply_markup: keyboard,
     });
 
@@ -327,6 +504,7 @@ async function handleCustomersRequest(chatId) {
     bot.sendMessage(chatId, "❌ Lỗi khi lấy danh sách khách hàng.");
   }
 }
+
 // });
 
 // bot.onText(/\/chonngay/, (msg) => {
@@ -436,7 +614,11 @@ function parseVietnameseDate(dateString) {
   const months = {
     "tháng 1": "01", "tháng 2": "02", "tháng 3": "03", "tháng 4": "04",
     "tháng 5": "05", "tháng 6": "06", "tháng 7": "07", "tháng 8": "08",
-    "tháng 9": "09", "tháng 10": "10", "tháng 11": "11", "tháng 12": "12"
+    "tháng 9": "09", "tháng 10": "10", "tháng 11": "11", "tháng 12": "12",
+
+    "tháng 01": "01", "tháng 02": "02", "tháng 03": "03", "tháng 04": "04",
+    "tháng 05": "05", "tháng 06": "06", "tháng 07": "07", "tháng 08": "08",
+    "tháng 09": "09"
   };
 
   // Tìm các phần Ngày, Tháng, Năm
@@ -457,6 +639,9 @@ function parseVietnameseDate(dateString) {
 }
 
 function parseVietnameseNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
   if (typeof value === "number") {
     return value;
   }
@@ -589,6 +774,13 @@ const generateReportForDays = async (days) => {
   return generateExcelReport(orders, `./report_${days}_days.xlsx`);
 };
 
+const generateAllReports = async () => {
+  console.log(`📥 Đang tổng hợp tất cả hóa đơn`);
+
+  const orders = await fetchOrders("1 = 1", []); // Không có điều kiện lọc ngày
+  return generateExcelReport(orders, `./report_all.xlsx`);
+};
+
 // Hàm yêu cầu người dùng nhập số ngày
 async function askForDays(chatId, customerName) {
   return new Promise((resolve) => {
@@ -638,12 +830,12 @@ async function generateOrderItemReport(chatId, days) {
     }
 
     // 📝 Log dữ liệu ra console
-    console.log("📌 Dữ liệu báo cáo mặt hàng:");
-    rows.forEach((row, index) => {
-      console.log(
-        `${index + 1}. ${row.item_name} - Đơn giá: ${row.unit_price} VND - Số lượng: ${row.total_quantity} - Tổng tiền: ${row.total_price} VND`
-      );
-    });
+    // console.log("📌 Dữ liệu báo cáo mặt hàng:");
+    // rows.forEach((row, index) => {
+    //   console.log(
+    //     `${index + 1}. ${row.item_name} - Đơn giá: ${row.unit_price} VND - Số lượng: ${row.total_quantity} - Tổng tiền: ${row.total_price} VND`
+    //   );
+    // });
 
     // Tạo workbook và worksheet
     const worksheetData = [
@@ -730,5 +922,103 @@ const clearDatabase = async (chatId) => {
   } catch (err) {
     console.error(`❌ Lỗi khi xóa dữ liệu: ${err.message}`);
     bot.sendMessage(chatId, "❌ Xóa dữ liệu thất bại.");
+  }
+};
+
+// Hàm xóa dữ liệu
+const deleteOrderById = async (chatId, orderId) => {
+  try {
+    if (!orderId || isNaN(orderId)) {
+      bot.sendMessage(chatId, "⚠️ Vui lòng nhập ID hóa đơn hợp lệ.");
+      console.error("❌ Lỗi: orderId không hợp lệ", orderId);
+      return;
+    }
+
+    // Kết nối đến database
+    const connection = await mysql.createConnection(dbConfig);
+
+    // Xóa tất cả Order_Items trước để tránh lỗi khóa ngoại
+    await connection.execute("DELETE FROM Order_Items WHERE order_id = ?", [orderId]);
+
+    // Xóa hóa đơn sau khi xóa Order_Items
+    const [result] = await connection.execute("DELETE FROM Orders WHERE id = ?", [orderId]);
+
+    if (result.affectedRows > 0) {
+      bot.sendMessage(chatId, `✅ Đã xóa hóa đơn ID: ${orderId} và các Order_Items liên quan.`);
+    } else {
+      bot.sendMessage(chatId, "⚠️ Không tìm thấy hóa đơn để xóa.");
+    }
+
+    // Đóng kết nối sau khi hoàn tất
+    await connection.end();
+  } catch (err) {
+    console.error(`❌ Lỗi khi xóa dữ liệu: ${err.message}`);
+    bot.sendMessage(chatId, "❌ Xóa dữ liệu thất bại.");
+  }
+};
+
+
+const deleteOrderByCustomer = async (chatId) => {
+  try {
+    const connection = await mysql.createConnection(dbConfig);
+
+    // Truy vấn danh sách khách hàng
+    const [customers] = await connection.execute("SELECT id, name FROM Customers");
+
+    if (customers.length === 0) {
+      bot.sendMessage(chatId, "⚠️ Không có khách hàng nào.");
+      return;
+    }
+
+    // Tạo các nút chọn khách hàng
+    const customerButtons = customers.map((customer) => [
+      { text: customer.name, callback_data: `select_customer_${customer.id}` }
+    ]);
+
+    const keyboard = { inline_keyboard: customerButtons };
+    bot.sendMessage(chatId, "📌 Chọn khách hàng:", { reply_markup: keyboard });
+
+    await connection.end();
+  } catch (err) {
+    console.error("❌ Lỗi truy vấn database:", err);
+    bot.sendMessage(chatId, "❌ Lỗi truy vấn database.");
+  }
+};
+
+// Xử lý khi chọn khách hàng để xem hóa đơn cần xóa
+const deleteAllOrdersByCustomer = async (chatId, customerId) => {
+  try {
+    const connection = await mysql.createConnection(dbConfig);
+
+    // Lấy danh sách order_id của khách hàng này
+    const [orders] = await connection.execute(
+      "SELECT id FROM Orders WHERE customer_id = ?",
+      [customerId]
+    );
+
+    if (orders.length === 0) {
+      bot.sendMessage(chatId, "⚠️ Khách hàng này không có hóa đơn để xóa.");
+      return;
+    }
+
+    // Lấy danh sách ID đơn hàng
+    const orderIds = orders.map(order => order.id);
+
+    // Xóa Order_Items trước (vì có ràng buộc khóa ngoại)
+    await connection.execute(
+      `DELETE FROM Order_Items WHERE order_id IN (${orderIds.join(",")})`
+    );
+
+    // Xóa Orders
+    await connection.execute(
+      `DELETE FROM Orders WHERE id IN (${orderIds.join(",")})`
+    );
+
+    bot.sendMessage(chatId, `✅ Đã xóa ${orderIds.length} hóa đơn và tất cả mục liên quan.`);
+
+    await connection.end();
+  } catch (err) {
+    console.error("❌ Lỗi khi xóa hóa đơn:", err);
+    bot.sendMessage(chatId, "❌ Xóa hóa đơn thất bại.");
   }
 };
